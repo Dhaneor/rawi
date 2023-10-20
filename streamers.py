@@ -54,6 +54,7 @@ VALID_EXCHANGES = {
 }
 
 shutdown = False
+config = Streamer()
 
 
 # ======================================================================================
@@ -356,7 +357,7 @@ def get_stream_manager():
 
 
 # --------------------------------------------------------------------------------------
-async def streamer(context: ContextT, config: ConfigT):
+async def streamer(config: ConfigT, context: ContextT):
     ctx = context or zmq.asyncio.Context()
 
     async with Gond(config, ctx) as g:  # noqa: F841
@@ -366,7 +367,7 @@ async def streamer(context: ContextT, config: ConfigT):
         while True:
             try:
 
-                pass
+                await asyncio.sleep(10)
 
             except asyncio.CancelledError:
                 logger.info("Cancelled...")
@@ -406,6 +407,6 @@ if __name__ == "__main__":
     logger.addHandler(ch)
 
     try:
-        asyncio.run(streamer(None, None))
+        asyncio.run(streamer(config=config, context=None))
     except KeyboardInterrupt:
         print("Interrupted...")

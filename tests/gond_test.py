@@ -35,7 +35,7 @@ async def main():
 
     For testing it registers with itself, and sends itself heartbeats.
     For practical applications this would make no sense, but that's how
-    we can test both directions on one go.
+    we can test both directions in one go.
     """
 
     cnf = BaseConfig("kucoin", ["spot"], [])
@@ -51,14 +51,8 @@ async def main():
     }
 
     async with Gond(cnf) as g:  # noqa: F841
-        # logger.debug(g)
-
-        # await g.heart.listen_to(cnf.endpoints["heartbeat"])
-
         await asyncio.sleep(10)
         logger.debug("waking up from sleep ...")
-
-        # await g.heart.stop_listening_to(cnf.endpoints["heartbeat"])
 
 
 if __name__ == '__main__':

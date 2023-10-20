@@ -10,6 +10,7 @@ Created on Mon  Sep 18 19:17:23 2023
 
 @author_ dhaneor
 """
+from collections import namedtuple
 from random import randint
 from typing import Sequence, TypeVar
 
@@ -19,9 +20,18 @@ from zmqbricks.base_config import BaseConfig, ConfigT  # noqa: F401, E402
 from zmqbricks.util.sockets import SockDef  # noqa: F401, E402
 from zmqbricks.fukujou.curve import generate_curve_key_pair  # noqa: F401, E402
 from util.random_names import random_elven_name as rand_name  # noqa: E402
-from keys import amanya as keys  # noqa: F401, E402
+# from keys import amanya as amanya_keys  # noqa: F401, E402
 
 ScrollT = TypeVar("ScrollT", bound=object)
+
+BaseConfig.encrypt = True
+
+keys = namedtuple("Keys", ["public", "private"])
+public, private = (
+    'c!7&H=VaCd^I4VO9W:z/<8dZ<cYeEmjs:9%BVF2^',
+    'wL7.a<)/r^@{0!8{U)AOPFJ#Ao}{KFUtvnSnN-g!'
+)
+amanya_keys = keys(public=public, private=private)
 
 
 # --------------------------------------------------------------------------------------
@@ -41,7 +51,13 @@ class Streamer(BaseConfig):
 
         self._endpoints = {
             "publisher": self.publisher_addr,
-            "heartbeat": self.publisher_addr
+            "heartbeat": f"tcp://127.0.0.1:{port + 1}",
+            "registration": f"tcp://127.0.0.1:{port + 2}",
+        }
+
+        self.service_registry = {
+            "endpoint": "tcp://127.0.0.1:6000",
+            "public_key": amanya_keys.public,
         }
 
 
@@ -90,17 +106,18 @@ class Amanya(BaseConfig):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+        self.name = "Amanya I."
         self.service_type = kwargs.get("service_type", Amanya.service_type)
 
         self._endpoints: dict[str, str] = {
-            "registration": "tcp://*:6000",
-            "requests": "tcp://*:6001",
-            "publisher": "tcp://*:6002",
-            "heartbeat": "tcp://*:33333"
+            "registration": "tcp://127.0.0.1:6000",
+            "requests": "tcp://127.0.0.1:6001",
+            "publisher": "tcp://127.0.0.1:6002",
+            "heartbeat": "tcp://127.0.0.1:33333"
         }
 
-        self.public = keys.public
-        self.private = keys.private
+        self.public_key = amanya_keys.public
+        self.private_key = amanya_keys.private
 
 
 # --------------------------------------------------------------------------------------

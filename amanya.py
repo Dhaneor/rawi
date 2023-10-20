@@ -95,7 +95,11 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
 
         while True:
             try:
-                logger.info("running ...")
+                logger.info(
+                    "running at %s ... (%s)",
+                    config.endpoints.get('registration'),
+                    config.public_key
+                )
                 events = dict(await poller.poll(1000))
 
                 if requests in events:
@@ -108,6 +112,8 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
                     reply = json.dumps(services) if services else b""
 
                     requests.send_multipart([key, reply])
+
+                await asyncio.sleep(5)
 
             except zmq.ZMQError as e:
                 logger.error(e)
@@ -130,6 +136,7 @@ async def main():
     except asyncio.CancelledError:
         logger.info("cancelled ...")
 
+    await asyncio.sleep(0.5)
     logger.info("shutdown complete: OK")
 
 if __name__ == "__main__":

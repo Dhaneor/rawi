@@ -17,7 +17,9 @@ sys.path.append(dir(dir(__file__)))
 from streamers import streamer, get_stream_manager, VALID_EXCHANGES  # noqa: E402, F401
 from util.enums import SubscriptionType, MarketType  # noqa: E402, F401
 from util.subscription_request import SubscriptionRequest  # noqa: E402, F401
+from zmq_config import Streamer  # noqa: E402
 
+config = Streamer()
 
 logger = logging.getLogger('main')
 logger.setLevel(logging.DEBUG)
@@ -115,6 +117,14 @@ async def test_stream_manager():
         await asyncio.sleep(1)
 
 
+async def test_streamer():
+    try:
+        await streamer(config, None)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+
+    await asyncio.sleep(1)
+
 # --------------------------------------------------------------------------------------
 if __name__ == '__main__':
-    asyncio.run(test_stream_manager())
+    asyncio.run(test_streamer())
