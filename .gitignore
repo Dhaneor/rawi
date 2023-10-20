@@ -1,0 +1,16 @@
+**/__pycache__
+/api
+/_backups
+/_configs
+/_experiments
+/src/_research
+/_liquidities
+/research
+/config.py
+/*.ini
+**/keys
+.DS_Store
+.vscode
+playground.ipynb
+/zguide
+talib_src_latest/ta-lib-python
