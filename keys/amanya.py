@@ -7,5 +7,7 @@ Created on Fri Oct 06 22:53:23 2023
 
 @author_ dhaneor
 """
-private = '6oeWOS%Xu:mIvz3YGD8f4Z(oj8%!w7&e$@b+lgx-'
-public = 'W{<X-R!j*>]<.oniXR/SzV#85<OcZk2x/U[f[%KP'
+public, private = (
+    'c!7&H=VaCd^I4VO9W:z/<8dZ<cYeEmjs:9%BVF2^',
+    'wL7.a<)/r^@{0!8{U)AOPFJ#Ao}{KFUtvnSnN-g!'
+)

@@ -20,17 +20,12 @@ from zmqbricks.base_config import BaseConfig, ConfigT  # noqa: F401, E402
 from zmqbricks.util.sockets import SockDef  # noqa: F401, E402
 from zmqbricks.fukujou.curve import generate_curve_key_pair  # noqa: F401, E402
 from util.random_names import random_elven_name as rand_name  # noqa: E402
-# from keys import amanya as amanya_keys  # noqa: F401, E402
-
+from keys.amanya import public, private  # noqa: F401, E402
 ScrollT = TypeVar("ScrollT", bound=object)
 
 BaseConfig.encrypt = True
 
 keys = namedtuple("Keys", ["public", "private"])
-public, private = (
-    'c!7&H=VaCd^I4VO9W:z/<8dZ<cYeEmjs:9%BVF2^',
-    'wL7.a<)/r^@{0!8{U)AOPFJ#Ao}{KFUtvnSnN-g!'
-)
 amanya_keys = keys(public=public, private=private)
 
 
