@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Provides a webocket streamer components.
+Provides a webocket streamer components...
 
 Created on Tue Oct 10  09:10:23 2023
 
