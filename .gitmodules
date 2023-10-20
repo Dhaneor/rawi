@@ -1,3 +1,6 @@
 [submodule "zmqbricks"]
 	path = zmqbricks
 	url = https://github.com/Dhaneor/zmqbricks.git
+[submodule "kucoin"]
+	path = kucoin
+	url = https://github.com/Dhaneor/kucoin-python-sdk
