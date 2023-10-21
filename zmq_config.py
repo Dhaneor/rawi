@@ -25,8 +25,8 @@ ScrollT = TypeVar("ScrollT", bound=object)
 
 BaseConfig.encrypt = True
 
-keys = namedtuple("Keys", ["public", "private"])
-amanya_keys = keys(public=public, private=private)
+Keys = namedtuple("Keys", ["public", "private"])
+amanya_keys = Keys(public=public, private=private)
 
 
 # --------------------------------------------------------------------------------------
@@ -34,6 +34,7 @@ class Streamer(BaseConfig):
     """Configuration for the streamer component."""
 
     service_type: str = "streamer"
+    port = randint(cnf.STREAMER_BASE_PORT, cnf.STREAMER_BASE_PORT + 50)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -41,13 +42,12 @@ class Streamer(BaseConfig):
         self.service_type = kwargs.get("service_type", Streamer.service_type)
         self.register_at = kwargs.get("register_at", cnf.collector_mgmt)
 
-        port = randint(cnf.STREAMER_BASE_PORT, cnf.STREAMER_BASE_PORT + 50)
-        self.publisher_addr = (f"tcp://127.0.0.1:{port}")
+        self.publisher_addr = (f"tcp://127.0.0.1:{self.port}")
 
         self._endpoints = {
             "publisher": self.publisher_addr,
-            "heartbeat": f"tcp://127.0.0.1:{port + 1}",
-            "registration": f"tcp://127.0.0.1:{port + 2}",
+            "heartbeat": f"tcp://127.0.0.1:{self.port + 1}",
+            "registration": f"tcp://127.0.0.1:{self.port + 2}",
         }
 
         self.service_registry = {
@@ -103,6 +103,7 @@ class Amanya(BaseConfig):
 
         self.name = "Amanya I."
         self.service_type = kwargs.get("service_type", Amanya.service_type)
+        self.rgstr_with_csr = False  # this is the CSR
 
         self._endpoints: dict[str, str] = {
             "registration": "tcp://127.0.0.1:6000",
