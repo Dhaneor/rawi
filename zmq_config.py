@@ -21,12 +21,11 @@ from zmqbricks.util.sockets import SockDef  # noqa: F401, E402
 from zmqbricks.fukujou.curve import generate_curve_key_pair  # noqa: F401, E402
 from util.random_names import random_elven_name as rand_name  # noqa: E402
 from keys.amanya import public, private  # noqa: F401, E402
+
 ScrollT = TypeVar("ScrollT", bound=object)
-
-BaseConfig.encrypt = True
-
 Keys = namedtuple("Keys", ["public", "private"])
 amanya_keys = Keys(public=public, private=private)
+BaseConfig.encrypt = True
 
 
 # --------------------------------------------------------------------------------------
@@ -40,7 +39,9 @@ class Streamer(BaseConfig):
         super().__init__(*args, **kwargs)
         self.name = rand_name(gender='male')
         self.service_type = kwargs.get("service_type", Streamer.service_type)
+
         self.register_at = kwargs.get("register_at", cnf.collector_mgmt)
+        self.rgstr_with = ["csr", "collector"]
 
         self.publisher_addr = (f"tcp://127.0.0.1:{self.port}")
 
@@ -68,6 +69,8 @@ class Collector(BaseConfig):
         super().__init__(*args, **kwargs)
         self.name = rand_name(gender='male')
         self.service_type = kwargs.get("service_type", Collector.service_type)
+
+        self.rgstr_with = ["csr"]
 
         self._endpoints = {
             "publisher": cnf.collector_sub,
@@ -103,7 +106,9 @@ class Amanya(BaseConfig):
 
         self.name = "Amanya I."
         self.service_type = kwargs.get("service_type", Amanya.service_type)
+
         self.rgstr_with_csr = False  # this is the CSR
+        self.rgstr_with = None
 
         self._endpoints: dict[str, str] = {
             "registration": "tcp://127.0.0.1:6000",

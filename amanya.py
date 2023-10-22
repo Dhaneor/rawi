@@ -25,15 +25,9 @@ import zmq.asyncio
 
 from typing import Optional, TypeVar  # noqa: F401
 
-# # --------------------------------------------------------------------------------------
-# current = os.path.dirname(os.path.realpath(__file__))
-# parent = os.path.dirname(current)
-# sys.path.append(parent)
-# # --------------------------------------------------------------------------------------
-
 from zmqbricks import gond  # noqa: F401, E402
 from zmqbricks import heartbeat as hb  # noqa: F401, E402
-from zmq_config import BaseConfig, Amanya  # noqa: F401, E402
+from zmq_config import BaseConfig, Amanya, Streamer, Collector  # noqa: F401, E402
 
 if __name__ == "__main__":
     logger = logging.getLogger("main")
@@ -104,7 +98,7 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
 
                 if requests in events:
                     msg = await requests.recv_multipart()
-                    key, req = msg[0], msg[1]
+                    key, req = msg[0], msg[1:]
 
                     service_type = req.get("service_type")
 
