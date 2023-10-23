@@ -73,10 +73,9 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
     """
     ctx = context or zmq.asyncio.Context()
 
-    async with gond.Gond(config, context=ctx) as g:  # noqa: F841
+    async with gond.Gond(config=config, ctx=ctx) as g:  # noqa: F841
 
-        poller = zmq.asyncio.Poller()
-        registry = g.kinsfolk
+        poller, registry = zmq.asyncio.Poller(), g.kinsfolk
 
         logger.info("configuring requests socket at %s", config.req_addr)
         requests = ctx.socket(zmq.ROUTER)
@@ -100,9 +99,7 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
                     msg = await requests.recv_multipart()
                     key, req = msg[0], msg[1:]
 
-                    service_type = req.get("service_type")
-
-                    services = registry.get_all(service_type)
+                    services = registry.get_all(req.get("service_type"), [])
                     reply = json.dumps(services) if services else b""
 
                     requests.send_multipart([key, reply])
@@ -117,21 +114,16 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
         requests.close()
 
     if context is not None:
-        ctx.term()
+        await ctx.term()
 
 
 # ======================================================================================
 async def main():
-    ctx = zmq.asyncio.Context()
-    config = Amanya()
-
     try:
-        await amanya(config, ctx)
+        await amanya(config=Amanya(), context=zmq.asyncio.Context())
     except asyncio.CancelledError:
-        logger.info("cancelled ...")
-
-    await asyncio.sleep(0.5)
-    logger.info("shutdown complete: OK")
+        await asyncio.sleep(0.5)
+        logger.info("shutdown complete: OK")
 
 if __name__ == "__main__":
     try:

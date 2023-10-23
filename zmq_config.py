@@ -12,19 +12,19 @@ Created on Mon  Sep 18 19:17:23 2023
 """
 from collections import namedtuple
 from random import randint
-from typing import Sequence, TypeVar
+from typing import Sequence
 
 import config as cnf  # noqa: F401, E402
 
 from zmqbricks.base_config import BaseConfig, ConfigT  # noqa: F401, E402
 from zmqbricks.util.sockets import SockDef  # noqa: F401, E402
-from zmqbricks.fukujou.curve import generate_curve_key_pair  # noqa: F401, E402
 from util.random_names import random_elven_name as rand_name  # noqa: E402
 from keys.amanya import public, private  # noqa: F401, E402
 
-ScrollT = TypeVar("ScrollT", bound=object)
+# encryption keys for the Central Service Registry (Amanya)
 Keys = namedtuple("Keys", ["public", "private"])
 amanya_keys = Keys(public=public, private=private)
+
 BaseConfig.encrypt = True
 
 
@@ -182,7 +182,7 @@ async def get_rgstr_info(
     service_type,
     exchange="kcuoin",
     market="spot"
-) -> ScrollT | None:
+) -> ConfigT | None:
 
     markets = [market] if isinstance(market, str) else market
 

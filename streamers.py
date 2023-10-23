@@ -378,7 +378,7 @@ async def streamer(config: ConfigT, context: ContextT):
                 await asyncio.sleep(SLEEP_ON_ERROR)
 
         # tell the manager to pack it up ...
-        manager(b"", None)
+        await manager(b"", None)
 
     # if counter > 0:
     #     duration = perf_counter() - start
