@@ -43,6 +43,8 @@ if __name__ == "__main__":
 ConfigT = TypeVar("ConfigT", bound=BaseConfig)
 ContextT = TypeVar("ContextT", bound=zmq.asyncio.Context)
 
+test_msg = Collector().as_dict()
+
 
 # ======================================================================================
 async def amanya(config: ConfigT, context: Optional[ContextT] = None):
@@ -84,6 +86,13 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
         requests.curve_server = True
         requests.bind(config.endpoints.get("requests"))
 
+        logger.info("configuring publisher socket at %s", config.req_addr)
+        publisher = ctx.socket(zmq.PUB)
+        publisher.curve_secretkey = config.private_key.encode("ascii")
+        publisher.curve_publickey = config.public_key.encode("ascii")
+        publisher.curve_server = True
+        publisher.bind(config.endpoints.get("publisher"))
+
         poller.register(requests, zmq.POLLIN)
 
         while True:
@@ -93,16 +102,28 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
                     config.endpoints.get('registration'),
                     config.public_key
                 )
-                events = dict(await poller.poll(1000))
+                events = dict(await poller.poll())
 
                 if requests in events:
                     msg = await requests.recv_multipart()
-                    key, req = msg[0], msg[1:]
+                    key, service_type = msg[0], msg[1].decode()
 
-                    services = registry.get_all(req.get("service_type"), [])
-                    reply = json.dumps(services) if services else b""
+                    kinsmen = await registry.get_all(service_type)
+                    scrolls = [k.to_scroll() for k in kinsmen]
+                    reply = json.dumps(scrolls) if scrolls else [b""]
+                    reply.insert(0, key)
+                    reply.insert(1, b"ADD")
 
-                    requests.send_multipart([key, reply])
+                    requests.send_multipart(reply)
+
+                # just for testing ...
+                logger.debug("sending test update ...")
+                await publisher.send_multipart(
+                    [
+                        b"ADD",
+                        json.dumps(test_msg).encode()
+                    ]
+                )
 
                 await asyncio.sleep(5)
 
@@ -110,11 +131,15 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
                 logger.error(e)
             except asyncio.CancelledError:
                 break
+            except Exception as e:
+                logger.error("unexpected error: %s", e, exc_info=1)
+                break
 
-        requests.close()
+        requests.close(0)
+        publisher.close(0)
 
-    if context is not None:
-        await ctx.term()
+    # if context is not None:
+    #     await ctx.term()
 
 
 # ======================================================================================

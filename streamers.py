@@ -308,7 +308,7 @@ def get_stream_manager():
         """
         # log request
         action_str = "subscribe" if action else "unsubscribe"
-        logger.debug("=" * 120)
+        logger.debug("=" * 80)
         logger.info("received %s request --> %s", action_str.upper(), req)
 
         # shutdown if we got None as subscription request
