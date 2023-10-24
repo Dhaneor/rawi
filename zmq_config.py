@@ -40,7 +40,6 @@ class Streamer(BaseConfig):
         self.name = rand_name(gender='male')
         self.service_type = kwargs.get("service_type", Streamer.service_type)
 
-        self.register_at = kwargs.get("register_at", cnf.collector_mgmt)
         self.rgstr_with = ["csr", "collector"]
 
         self.publisher_addr = (f"tcp://127.0.0.1:{self.port}")
@@ -71,12 +70,9 @@ class Collector(BaseConfig):
         self.service_type = kwargs.get("service_type", Collector.service_type)
 
         self.rgstr_with = ["csr"]
-
-        self._endpoints = {
-            "publisher": cnf.collector_sub,
-            "subscriber": cnf.collector_pub,
-            "registration": cnf.collector_mgmt,
-            "heartbeat": cnf.collector_hb
+        self.service_registry = {
+            "endpoint": "tcp://127.0.0.1:6000",
+            "public_key": amanya_keys.public,
         }
 
         self.public_key, self.private_key = cnf.COLLECTOR_KEYS
@@ -98,7 +94,7 @@ class OhlcvRepository(BaseConfig):
 class Amanya(BaseConfig):
     """Configuration for the Amanya component."""
 
-    service_type: str = "amanya"
+    service_type: str = "Central Configuration Service"
     desc: str = "Central Configuration Service"
 
     def __init__(self, *args, **kwargs) -> None:

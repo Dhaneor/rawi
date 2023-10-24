@@ -35,31 +35,21 @@ from statistics import mean
 from time import time
 from typing import Optional, Sequence, Mapping, TypeVar
 
-# # --------------------------------------------------------------------------------------
-# current = os.path.dirname(os.path.realpath(__file__))
-# parent = os.path.dirname(current)
-# sys.path.append(parent)
-# # --------------------------------------------------------------------------------------
-
-import zmq_config as cnf  # noqa: F401, E402
 from util.sequence import monitor_sequence  # noqa: F401, E402
+from util.subscription_request import SubscriptionRequest  # noqa: F401, E402
+from zmq_config import Collector  # noqa: F401, E402
 
+from zmqbricks.gond import Gond  # noqa: F401, E402
 from zmqbricks.kinsfolk import Kinsfolk, Kinsman, KinsfolkT  # noqa: F401, E402
 from zmqbricks.registration import Scroll, monitor_registration  # noqa: F401, E402
 from zmqbricks import heartbeat as hb  # noqa: F401, E402
+from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
 
-logger = logging.getLogger("main")
-logger.setLevel(logging.INFO)
-ch = logging.StreamHandler()
-formatter = logging.Formatter(
-    "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"
-)
-ch.setFormatter(formatter)
-logger.addHandler(ch)
+logger = logging.getLogger("main.collector")
 
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-ConfigT = TypeVar("ConfigT", bound=cnf.Collector)
+ConfigT = TypeVar("ConfigT", bound=Collector)
 TopicsT: TypeVar = Sequence[str]
 SockT: TypeVar = zmq.Socket
 StatsT: TypeVar = Mapping[str, Sequence[float]]
@@ -247,7 +237,7 @@ async def request_to_register(uid: str, socket: zmq.Socket) -> None:
 
 @monitor_sequence(callback=handle_missing_seq_no)
 async def process_update(msg: dict):
-    """I'm just here to montor the sequence number ... for now."""
+    """I'm just here to monitor the sequence number ... for now."""
     pass
 
 
@@ -310,8 +300,8 @@ async def metrics(start_ts: float, epochs: int, msg_count: int, stats: StatsT) -
 
 
 # ======================================================================================
-async def collector(
-    config: cnf.Collector,
+async def collector_old(
+    config: Collector,
     ctx: Optional[zmq.asyncio.Context] = None,
 ):
     """Collects data from multiple producers and removes duplicates.
@@ -510,8 +500,55 @@ async def collector(
         context.term()
 
 
+async def collector(config: Collector):
+    ctx = zmq.asyncio.Context.instance()
+    poller = zmq.asyncio.Poller()
+
+    publisher = await get_random_server_socket("publisher", zmq.PUB, config)
+    _ = await get_random_server_socket("registration", zmq.ROUTER, config)
+    _ = await get_random_server_socket("heartbeat", zmq.PUB, config)
+
+    # configure the subscriber port
+    subscriber = ctx.socket(zmq.SUB)
+    subscriber.curve_secretkey = config.private_key.encode("ascii")
+    subscriber.curve_publickey = config.public_key.encode("ascii")
+
+    # register sockets with poller
+    for s in (publisher, subscriber):
+        poller.register(s, zmq.POLLIN)
+
+    msg_cache, msg_count = deque(maxlen=config.max_cache_size), 0
+
+    async with Gond(config, ctx):
+        while True:
+            try:
+                events = dict(await poller.poll())
+
+                if subscriber in events:
+                    msg = await subscriber.recv_multipart()
+
+                    # handle data update
+                    if not msg[0] == b"heartbeat" and msg not in msg_cache:
+                        await publisher.send_multipart(msg)
+                        msg_cache.append(msg)
+
+                    msg_count += 1
+
+                if publisher in events:
+                    msg = await publisher.recv()
+
+                    logger.debug("subscribe | unsubscribe @ publisher port: %s" % msg)
+
+            except asyncio.CancelledError:
+                logger.debug("collector cancelled ...")
+                break
+
+    publisher.close(0)
+    subscriber.close(0)
+
+
 async def main():
-    config = cnf.get_config("collector", "kucoin", ["spot"], [])
+    config = Collector("collector", "kucoin", ["spot"], [])
     tasks = [asyncio.create_task(collector(config))]
 
     try:
@@ -532,6 +569,15 @@ async def main():
 
 
 if __name__ == "__main__":
+    logger = logging.getLogger("main")
+    logger.setLevel(logging.INFO)
+    ch = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"
+    )
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

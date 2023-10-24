@@ -16,7 +16,6 @@ import zmq.asyncio
 
 from ccxt.base.errors import BadSymbol, NetworkError, ExchangeNotAvailable
 from functools import partial
-from pprint import pprint  # noqa: F401
 from typing import Coroutine, TypeVar, Optional
 
 from util.sequence import sequence

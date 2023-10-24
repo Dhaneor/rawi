@@ -18,15 +18,16 @@ Created on Tue Sep 12 19:41:23 2023
 import asyncio
 import json
 import logging
-# import os
-# import sys
 import zmq
 import zmq.asyncio
 
-from typing import Optional, TypeVar  # noqa: F401
+from functools import partial
+from typing import TypeVar  # noqa: F401
 
 from zmqbricks import gond  # noqa: F401, E402
 from zmqbricks import heartbeat as hb  # noqa: F401, E402
+from zmqbricks.registration import ScrollT  # noqa: F401, E402
+from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
 from zmq_config import BaseConfig, Amanya, Streamer, Collector  # noqa: F401, E402
 
 if __name__ == "__main__":
@@ -39,15 +40,38 @@ if __name__ == "__main__":
     logger.addHandler(ch)
     logger.setLevel(logging.DEBUG)
 
-
 ConfigT = TypeVar("ConfigT", bound=BaseConfig)
 ContextT = TypeVar("ContextT", bound=zmq.asyncio.Context)
+SocktT = TypeVar("SocktT", bound=zmq.asyncio.Socket)
 
 test_msg = Collector().as_dict()
+test_msg["endpoints"]["registration"] = "tcp://127.0.0.1:5570"
 
 
 # ======================================================================================
-async def amanya(config: ConfigT, context: Optional[ContextT] = None):
+async def publish(scroll: ScrollT, socket: SocktT) -> None:
+    """Publishes a scroll to the given socket
+
+    Parameters
+    ----------
+    scroll : ScrollT
+        The scroll to publish
+    socket : SocktT
+        The socket to publish to
+    """
+    logger.debug("–~•~–" * 30)
+    logger.debug("===> publishing scroll for NEW KINSMAN: %s", scroll)
+    await socket.send_multipart(
+        [
+            scroll.service_type.encode(),
+            b"ADD",
+            json.dumps(scroll.as_dict()).encode()
+        ]
+    )
+
+
+# ======================================================================================
+async def amanya(config: ConfigT):
     """The Central Configuration Service (service registry)
 
     Amanya -> according to pi.ai:
@@ -73,59 +97,60 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
     ctx : ContextT, optional
         A ZeroMQ Context object, default None
     """
-    ctx = context or zmq.asyncio.Context()
+    ctx = zmq.asyncio.Context.instance()
 
-    async with gond.Gond(config=config, ctx=ctx) as g:  # noqa: F841
+    # requests = get_random_server_socket("requests", zmq.ROUTER, config)
+    requests = ctx.socket(zmq.ROUTER)
+    requests.curve_secretkey = config.private_key.encode("ascii")
+    requests.curve_publickey = config.public_key.encode("ascii")
+    requests.curve_server = True
+    requests.bind(config.endpoints.get("requests"))
+    logger.info("configured requests socket at %s", config.endpoints.get("requests"))
 
-        poller, registry = zmq.asyncio.Poller(), g.kinsfolk
+    publisher = ctx.socket(zmq.PUB)
+    publisher.curve_secretkey = config.private_key.encode("ascii")
+    publisher.curve_publickey = config.public_key.encode("ascii")
+    publisher.curve_server = True
+    publisher.bind(config.endpoints.get("publisher"))
+    logger.info("configured publisher socket at %s", config.endpoints.get("publisher"))
 
-        logger.info("configuring requests socket at %s", config.req_addr)
-        requests = ctx.socket(zmq.ROUTER)
-        requests.curve_secretkey = config.private_key.encode("ascii")
-        requests.curve_publickey = config.public_key.encode("ascii")
-        requests.curve_server = True
-        requests.bind(config.endpoints.get("requests"))
+    poller = zmq.asyncio.Poller()
+    poller.register(requests, zmq.POLLIN)
 
-        logger.info("configuring publisher socket at %s", config.req_addr)
-        publisher = ctx.socket(zmq.PUB)
-        publisher.curve_secretkey = config.private_key.encode("ascii")
-        publisher.curve_publickey = config.public_key.encode("ascii")
-        publisher.curve_server = True
-        publisher.bind(config.endpoints.get("publisher"))
+    async with gond.Gond(
+        config=config,
+        ctx=ctx,
+        on_rgstr_success=[partial(publish, socket=publisher)]
+    ) as g:  # noqa: F841
 
-        poller.register(requests, zmq.POLLIN)
+        registry = g.kinsfolk
 
         while True:
             try:
-                logger.info(
-                    "running at %s ... (%s)",
-                    config.endpoints.get('registration'),
-                    config.public_key
-                )
-                events = dict(await poller.poll())
+                # logger.info(
+                #     "running at %s ... (%s)",
+                #     config.endpoints.get('registration'),
+                #     config.public_key
+                # )
+                events = dict(await poller.poll(1000))
 
                 if requests in events:
                     msg = await requests.recv_multipart()
                     key, service_type = msg[0], msg[1].decode()
 
-                    kinsmen = await registry.get_all(service_type)
-                    scrolls = [k.to_scroll() for k in kinsmen]
-                    reply = json.dumps(scrolls) if scrolls else [b""]
+                    if kinsmen := await registry.get_all(service_type):
+                        reply = [
+                            json.dumps(k.to_scroll().as_dict()).encode()
+                            for k in kinsmen
+                        ]
+                    else:
+                        reply = [b""]
+
                     reply.insert(0, key)
-                    reply.insert(1, b"ADD")
+                    reply.insert(1, b"ADD")  # command
+                    reply.insert(1, msg[1])  # topic
 
                     requests.send_multipart(reply)
-
-                # just for testing ...
-                logger.debug("sending test update ...")
-                await publisher.send_multipart(
-                    [
-                        b"ADD",
-                        json.dumps(test_msg).encode()
-                    ]
-                )
-
-                await asyncio.sleep(5)
 
             except zmq.ZMQError as e:
                 logger.error(e)
@@ -145,7 +170,7 @@ async def amanya(config: ConfigT, context: Optional[ContextT] = None):
 # ======================================================================================
 async def main():
     try:
-        await amanya(config=Amanya(), context=zmq.asyncio.Context())
+        await amanya(config=Amanya())
     except asyncio.CancelledError:
         await asyncio.sleep(0.5)
         logger.info("shutdown complete: OK")
