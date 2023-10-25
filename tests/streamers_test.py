@@ -119,7 +119,7 @@ async def test_stream_manager():
 
 async def test_streamer():
     try:
-        await streamer(config, None)
+        await streamer(config)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

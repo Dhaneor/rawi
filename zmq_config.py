@@ -70,6 +70,7 @@ class Collector(BaseConfig):
         self.service_type = kwargs.get("service_type", Collector.service_type)
 
         self.rgstr_with = ["csr"]
+
         self.service_registry = {
             "endpoint": "tcp://127.0.0.1:6000",
             "public_key": amanya_keys.public,
@@ -80,10 +81,32 @@ class Collector(BaseConfig):
 
 class OhlcvRegistry(BaseConfig):
     """Configuration for the ohlcv registry"""
+
+    service_type = "ohlcv_registry"
+
     PUBLISHER_ADDR = "inproc://craeft_pond"
     REPO_ADDR = cnf.ohlcv_repo_req
     cnf.collector_PUB_ADDR = cnf.collector_pub
     CONTAINER_SIZE_LIMIT = 1000
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = rand_name(gender="female")
+        self.service_type = kwargs.get("service_type", OhlcvRegistry.service_type)
+        self.rgstr_with = ["csr", "collector"]
+
+        self.service_registry = {
+            "endpoint": "tcp://127.0.0.1:6000",
+            "public_key": amanya_keys.public,
+        }
+
+        self.port = randint(10000, 60000)
+
+        self._endpoints = {
+            "publisher": f"tcp://127.0.0.1:{self.port}",
+            "heartbeat": f"tcp://127.0.0.1:{self.port + 1}",
+            "registration": f"tcp://127.0.0.1:{self.port + 2}",
+        }
 
 
 class OhlcvRepository(BaseConfig):

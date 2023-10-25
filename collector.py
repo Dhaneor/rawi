@@ -24,26 +24,27 @@ Created on Tue Sep 12 19:41:23 2023
 """
 import asyncio
 import logging
-import uvloop
-import zmq
-import zmq.asyncio
-
 from collections import deque
 from functools import partial
 from random import choice
 from statistics import mean
 from time import time
-from typing import Optional, Sequence, Mapping, TypeVar
+from typing import Mapping, Optional, Sequence, TypeVar
+
+import uvloop
+import zmq
+import zmq.asyncio
+
+from zmq_config import Collector  # noqa: F401, E402
+from zmqbricks import heartbeat as hb  # noqa: F401, E402
+from zmqbricks.gond import Gond  # noqa: F401, E402
+from zmqbricks.kinsfolk import Kinsfolk, KinsfolkT, Kinsman  # noqa: F401, E402
+from zmqbricks.registration import (Scroll,  # noqa: F401, E402
+                                    monitor_registration)
+from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
 
 from util.sequence import monitor_sequence  # noqa: F401, E402
 from util.subscription_request import SubscriptionRequest  # noqa: F401, E402
-from zmq_config import Collector  # noqa: F401, E402
-
-from zmqbricks.gond import Gond  # noqa: F401, E402
-from zmqbricks.kinsfolk import Kinsfolk, Kinsman, KinsfolkT  # noqa: F401, E402
-from zmqbricks.registration import Scroll, monitor_registration  # noqa: F401, E402
-from zmqbricks import heartbeat as hb  # noqa: F401, E402
-from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
 
 logger = logging.getLogger("main.collector")
 
@@ -238,7 +239,6 @@ async def request_to_register(uid: str, socket: zmq.Socket) -> None:
 @monitor_sequence(callback=handle_missing_seq_no)
 async def process_update(msg: dict):
     """I'm just here to monitor the sequence number ... for now."""
-    pass
 
 
 async def metrics(start_ts: float, epochs: int, msg_count: int, stats: StatsT) -> None:
@@ -289,7 +289,7 @@ async def metrics(start_ts: float, epochs: int, msg_count: int, stats: StatsT) -
                 round(updates_per_second),
             )
         elif key != "epoch":
-            logger.info(f"average processing time for {key}: N/A")
+            logger.info("average processing time for %s: N/A" % key)
 
     # average latency if latencies were collected
     if (latencies := stats.get("latencies")) and len(latencies) > 0:
@@ -500,11 +500,23 @@ async def collector_old(
         context.term()
 
 
+async def connect_to_producer(producer, socket):
+    if producer.service_type == "streamer":
+        logger.debug(
+            "connecting to %s at %s", producer, producer.endpoints.get("publisher")
+        )
+        socket.curve_serverkey = producer.public_key.encode("ascii")
+        socket.connect(producer.endpoints.get("publisher"))
+        socket.setsockopt(zmq.SUBSCRIBE, b"mega_test")
+    else:
+        logger.debug("not connecting to %s", producer)
+
+
 async def collector(config: Collector):
-    ctx = zmq.asyncio.Context.instance()
+    ctx = zmq.asyncio.Context()
     poller = zmq.asyncio.Poller()
 
-    publisher = await get_random_server_socket("publisher", zmq.PUB, config)
+    publisher = await get_random_server_socket("publisher", zmq.XPUB, config)
     _ = await get_random_server_socket("registration", zmq.ROUTER, config)
     _ = await get_random_server_socket("heartbeat", zmq.PUB, config)
 
@@ -519,13 +531,19 @@ async def collector(config: Collector):
 
     msg_cache, msg_count = deque(maxlen=config.max_cache_size), 0
 
-    async with Gond(config, ctx):
+    async with Gond(
+        config=config,
+        ctx=ctx,
+        on_rgstr_success=[partial(connect_to_producer, socket=subscriber)]
+    ) as g:  # noqa: F841
         while True:
             try:
                 events = dict(await poller.poll())
 
                 if subscriber in events:
                     msg = await subscriber.recv_multipart()
+
+                    logger.debug("[%s]data update: %s", msg_count, msg)
 
                     # handle data update
                     if not msg[0] == b"heartbeat" and msg not in msg_cache:
@@ -535,9 +553,10 @@ async def collector(config: Collector):
                     msg_count += 1
 
                 if publisher in events:
-                    msg = await publisher.recv()
-
-                    logger.debug("subscribe | unsubscribe @ publisher port: %s" % msg)
+                    logger.info("something at publisher port ...")
+                    msg = await publisher.recv_multipart()
+                    logger.info("subscribe | unsubscribe @ publisher port: %s", msg)
+                    await publisher.send_multipart([b"heartbeat", b""])
 
             except asyncio.CancelledError:
                 logger.debug("collector cancelled ...")
@@ -548,7 +567,7 @@ async def collector(config: Collector):
 
 
 async def main():
-    config = Collector("collector", "kucoin", ["spot"], [])
+    config = Collector("kucoin", ["spot"], "collector")
     tasks = [asyncio.create_task(collector(config))]
 
     try:
@@ -570,7 +589,7 @@ async def main():
 
 if __name__ == "__main__":
     logger = logging.getLogger("main")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"

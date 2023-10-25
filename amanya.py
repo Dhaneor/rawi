@@ -18,17 +18,16 @@ Created on Tue Sep 12 19:41:23 2023
 import asyncio
 import json
 import logging
-import zmq
-import zmq.asyncio
 
 from functools import partial
 from typing import TypeVar  # noqa: F401
 
+import zmq
+import zmq.asyncio
+
 from zmqbricks import gond  # noqa: F401, E402
-from zmqbricks import heartbeat as hb  # noqa: F401, E402
 from zmqbricks.registration import ScrollT  # noqa: F401, E402
-from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
-from zmq_config import BaseConfig, Amanya, Streamer, Collector  # noqa: F401, E402
+from zmq_config import BaseConfig, Amanya, Collector  # noqa: F401, E402
 
 if __name__ == "__main__":
     logger = logging.getLogger("main")
@@ -172,7 +171,7 @@ async def main():
     try:
         await amanya(config=Amanya())
     except asyncio.CancelledError:
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2)
         logger.info("shutdown complete: OK")
 
 if __name__ == "__main__":

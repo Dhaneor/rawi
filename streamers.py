@@ -17,12 +17,14 @@ import zmq.asyncio
 from ccxt.base.errors import BadSymbol, NetworkError, ExchangeNotAvailable
 from functools import partial
 from typing import Coroutine, TypeVar, Optional
+from uuid import uuid4
 
 from util.sequence import sequence
 from util.enums import SubscriptionType, MarketType
 from util.subscription_request import SubscriptionRequest
 from zmqbricks.gond import Gond
 from zmq_config import Streamer, BaseConfig  # noqa: F401
+from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
 
 logger = logging.getLogger("main.streamers")
 
@@ -356,8 +358,10 @@ def get_stream_manager():
 
 
 # --------------------------------------------------------------------------------------
-async def streamer(config: ConfigT, context: ContextT):
-    ctx = context or zmq.asyncio.Context()
+async def streamer(config: ConfigT):
+    ctx = zmq.asyncio.Context.instance()
+
+    publisher = await get_random_server_socket("publisher", zmq.XPUB, config)
 
     async with Gond(config, ctx) as g:  # noqa: F841
         manager = get_stream_manager()
@@ -365,9 +369,9 @@ async def streamer(config: ConfigT, context: ContextT):
         # ..............................................................................
         while True:
             try:
-
-                await asyncio.sleep(10)
-
+                logger.info("sending test message...")
+                await publisher.send_multipart([b"mega_test", str(uuid4()).encode()])
+                await asyncio.sleep(3)
             except asyncio.CancelledError:
                 logger.info("Cancelled...")
                 break
@@ -406,6 +410,6 @@ if __name__ == "__main__":
     logger.addHandler(ch)
 
     try:
-        asyncio.run(streamer(config=config, context=None))
+        asyncio.run(streamer(config=config))
     except KeyboardInterrupt:
         print("Interrupted...")
