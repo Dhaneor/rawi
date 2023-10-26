@@ -19,7 +19,7 @@ Welcome to `rawi`, a reliable and modular crypto market data streaming service. 
 Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/rawi.git
+git clone https://github.com/Dhaneor/rawi.git
 ```
 
 ### Usage
