@@ -292,19 +292,16 @@ def get_stream_manager():
     workers: dict = {}
     topics: dict[str, int] = {}
 
-    async def stream_manager(
-        action: bytes, req: Optional[SubscriptionRequest] = None
-    ) -> None:
+    async def stream_manager(action: bytes, req: SubscriptionRequest | None) -> None:
         """Manages creation/removal of stream workers.
 
         Parameters
         ----------
         action : bytes
             subscribe (1) or unsubscribe (0)
-        req : SubscriptionRequest, optional
-            (un)subscribe request, by default None
-            For clean shutdown. If this is None, then we will
-            cancel all tasks/saubscriptions, and close the
+        req : SubscriptionRequest
+            An (un)subscribe request. For clean shutdown: If this is None,
+            then we will cancel all tasks/subscriptions, and close the
             exchange instances.
         """
         # log request
@@ -359,11 +356,9 @@ def get_stream_manager():
 
 # --------------------------------------------------------------------------------------
 async def streamer(config: ConfigT):
-    ctx = zmq.asyncio.Context.instance()
-
     publisher = await get_random_server_socket("publisher", zmq.XPUB, config)
 
-    async with Gond(config, ctx) as g:  # noqa: F841
+    async with Gond(config):
         manager = get_stream_manager()
 
         # ..............................................................................

@@ -73,17 +73,10 @@ async def test_client():
     subscriber.setsockopt(zmq.SUBSCRIBE, b"heartbeat")
     poller.register(subscriber, zmq.POLLIN)
 
+    on_rgstr_success = partial(connect_to_producer, socket=subscriber)
     next_sub_event = 0
 
-    async with Gond(
-        config=config,
-        ctx=ctx,
-        on_rgstr_success=[partial(connect_to_producer, socket=subscriber)]
-    ) as g:  # noqa: F841
-
-        # for producer in await g.kinsfolk.get_all("collector"):
-        #     connect_to_producer(subscriber, producer)
-
+    async with Gond(config=config, on_rgstr_success=[on_rgstr_success]):
         while True:
             try:
                 events = dict(await poller.poll(1000))

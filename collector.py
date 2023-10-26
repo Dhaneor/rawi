@@ -516,47 +516,32 @@ async def collector(config: Collector):
     ctx = zmq.asyncio.Context()
     poller = zmq.asyncio.Poller()
 
+    # configure publisher & subscriber socket
     publisher = await get_random_server_socket("publisher", zmq.XPUB, config)
-    _ = await get_random_server_socket("registration", zmq.ROUTER, config)
-    _ = await get_random_server_socket("heartbeat", zmq.PUB, config)
-
-    # configure the subscriber port
     subscriber = ctx.socket(zmq.SUB)
     subscriber.curve_secretkey = config.private_key.encode("ascii")
     subscriber.curve_publickey = config.public_key.encode("ascii")
 
-    # register sockets with poller
-    for s in (publisher, subscriber):
-        poller.register(s, zmq.POLLIN)
+    poller.register(publisher, zmq.POLLIN)
+    poller.register(subscriber, zmq.POLLIN)
 
     msg_cache, msg_count = deque(maxlen=config.max_cache_size), 0
+    on_rgstr = partial(connect_to_producer, socket=subscriber)
 
-    async with Gond(
-        config=config,
-        ctx=ctx,
-        on_rgstr_success=[partial(connect_to_producer, socket=subscriber)]
-    ) as g:  # noqa: F841
+    async with Gond(config=config, ctx=ctx, on_rgstr_success=[on_rgstr]):
         while True:
             try:
                 events = dict(await poller.poll())
 
                 if subscriber in events:
-                    msg = await subscriber.recv_multipart()
-
-                    logger.debug("[%s]data update: %s", msg_count, msg)
-
-                    # handle data update
-                    if not msg[0] == b"heartbeat" and msg not in msg_cache:
+                    if (msg := await subscriber.recv_multipart()) not in msg_cache:
                         await publisher.send_multipart(msg)
                         msg_cache.append(msg)
 
                     msg_count += 1
 
                 if publisher in events:
-                    logger.info("something at publisher port ...")
-                    msg = await publisher.recv_multipart()
-                    logger.info("subscribe | unsubscribe @ publisher port: %s", msg)
-                    await publisher.send_multipart([b"heartbeat", b""])
+                    await publisher.send_multipart(await publisher.recv_multipart())
 
             except asyncio.CancelledError:
                 logger.debug("collector cancelled ...")
