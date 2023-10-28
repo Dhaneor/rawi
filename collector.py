@@ -39,8 +39,7 @@ from zmq_config import Collector  # noqa: F401, E402
 from zmqbricks import heartbeat as hb  # noqa: F401, E402
 from zmqbricks.gond import Gond  # noqa: F401, E402
 from zmqbricks.kinsfolk import Kinsfolk, KinsfolkT, Kinsman  # noqa: F401, E402
-from zmqbricks.registration import (Scroll,  # noqa: F401, E402
-                                    monitor_registration)
+from zmqbricks.registration import Scroll, monitor_registration  # noqa: F401, E402
 from zmqbricks.util.sockets import get_random_server_socket  # noqa: F401, E402
 
 from util.sequence import monitor_sequence  # noqa: F401, E402
@@ -507,7 +506,6 @@ async def connect_to_producer(producer, socket):
         )
         socket.curve_serverkey = producer.public_key.encode("ascii")
         socket.connect(producer.endpoints.get("publisher"))
-        socket.setsockopt(zmq.SUBSCRIBE, b"mega_test")
     else:
         logger.debug("not connecting to %s", producer)
 
@@ -528,7 +526,7 @@ async def collector(config: Collector):
     msg_cache, msg_count = deque(maxlen=config.max_cache_size), 0
     on_rgstr = partial(connect_to_producer, socket=subscriber)
 
-    async with Gond(config=config, ctx=ctx, on_rgstr_success=[on_rgstr]):
+    async with Gond(config=config, on_rgstr_success=[on_rgstr]):
         while True:
             try:
                 events = dict(await poller.poll())
@@ -541,7 +539,15 @@ async def collector(config: Collector):
                     msg_count += 1
 
                 if publisher in events:
-                    await publisher.send_multipart(await publisher.recv_multipart())
+                    msg = await publisher.recv()
+                    action, topic = msg[0], msg[1:].decode("utf-8")
+                    logger.info(
+                        'received %s message: %s',
+                        "SUBSCRIBE" if action else "UNSUBSCRIBE",
+                        topic
+                    )
+                    action = zmq.SUBSCRIBE if action else zmq.UNSUBSCRIBE
+                    subscriber.setsockopt(action, topic.encode("utf-8"))
 
             except asyncio.CancelledError:
                 logger.debug("collector cancelled ...")

@@ -45,7 +45,7 @@ async def get_sub_req():
     return SubscriptionRequest(
         exchange="binance",
         market=MarketType.SPOT,
-        sub_type=SubscriptionType.TICKER,
+        sub_type=SubscriptionType.TRADES,
         symbol=choice(symbols)
     )
 
@@ -55,7 +55,6 @@ async def connect_to_producer(producer, socket):
         logger.debug("connecting to %s at %s", producer, producer.endpoints.get("publisher"))
         socket.curve_serverkey = producer.public_key.encode("ascii")
         socket.connect(producer.endpoints.get("publisher"))
-        socket.setsockopt(zmq.SUBSCRIBE, b"mega_test")
     else:
         logger.debug("not connecting to %s", producer)
 
@@ -70,7 +69,6 @@ async def test_client():
     subscriber = ctx.socket(zmq.SUB)
     subscriber.curve_secretkey = config.private_key.encode("ascii")
     subscriber.curve_publickey = config.public_key.encode("ascii")
-    subscriber.setsockopt(zmq.SUBSCRIBE, b"heartbeat")
     poller.register(subscriber, zmq.POLLIN)
 
     on_rgstr_success = partial(connect_to_producer, socket=subscriber)
@@ -92,7 +90,7 @@ async def test_client():
                     logger.debug("%s - %s", action, sr.to_json().encode())
                     subscriber.setsockopt(action, sr.to_json().encode())
 
-                    next_sub_event = time() + 5
+                    next_sub_event = time() + 15
             except asyncio.CancelledError:
                 await asyncio.sleep(0.5)
                 break

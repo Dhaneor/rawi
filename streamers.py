@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Provides a webocket streamer components...
+Provides webocket streamer components.
 
 Created on Tue Oct 10  09:10:23 2023
 
@@ -9,6 +9,7 @@ Created on Tue Oct 10  09:10:23 2023
 """
 import asyncio
 import ccxt.pro as ccxt
+import json
 import logging
 import time
 import zmq
@@ -17,7 +18,6 @@ import zmq.asyncio
 from ccxt.base.errors import BadSymbol, NetworkError, ExchangeNotAvailable
 from functools import partial
 from typing import Coroutine, TypeVar, Optional
-from uuid import uuid4
 
 from util.sequence import sequence
 from util.enums import SubscriptionType, MarketType
@@ -112,8 +112,14 @@ async def shut_down(workers: dict, exchanges: dict) -> None:
 
 # --------------------------------------------------------------------------------------
 @sequence(logger=logger, identifier="seq")
-async def send(msg: dict, socket: zmq.Socket):
-    await socket.send_json(msg)
+async def send(msg: dict, socket: zmq.Socket, topic: str):
+    logger.debug(f"sending message: {msg}")
+    await socket.send_multipart(
+        [
+            topic.encode("utf-8"),
+            json.dumps(msg).encode("utf-8")
+        ]
+    )
 
 
 @sequence(logger=logger, identifier="seq")
@@ -201,7 +207,8 @@ async def worker(
 async def create_worker(
     req: SubscriptionRequest,
     workers: dict,
-    exchanges: dict
+    exchanges: dict,
+    snd_coro: Coroutine,
 ) -> None:
     # abort if the topic is already registered
     if workers.get(req.exchange, {}).get(req.market, {}).get(req.topic, None):
@@ -255,10 +262,11 @@ async def create_worker(
 
     process = process_ohlcv if req.sub_type == SubscriptionType.OHLCV else None
     add_to_result = {"exchange": req.exchange, "market": req.market.value}
+    snd_coro = partial(snd_coro, topic=req.to_json())
 
     # create a worker task for the topic
     workers[req.exchange][req.market][req.topic] = asyncio.create_task(
-        worker(req.topic, rcv_coro, log_message, use_since, add_to_result, process),
+        worker(req.topic, rcv_coro, snd_coro, use_since, add_to_result, process),
         name=req.topic,
     )
 
@@ -287,7 +295,8 @@ async def remove_worker(
         del workers[req.exchange]
 
 
-def get_stream_manager():
+def get_stream_manager(snd_coro: Coroutine):
+    snd_coro = snd_coro
     exchanges: dict = {}
     workers: dict = {}
     topics: dict[str, int] = {}
@@ -320,7 +329,7 @@ def get_stream_manager():
         # subscribe to topic, create worker & exchange if needed
         if action_str == "subscribe":
             try:
-                await create_worker(req, workers, exchanges)
+                await create_worker(req, workers, exchanges, snd_coro)
             except Exception as e:
                 logger.error("unable to create worker: %s", e)
             else:
@@ -357,23 +366,25 @@ def get_stream_manager():
 # --------------------------------------------------------------------------------------
 async def streamer(config: ConfigT):
     publisher = await get_random_server_socket("publisher", zmq.XPUB, config)
+    manager = get_stream_manager(snd_coro=partial(send, socket=publisher))
 
     async with Gond(config):
-        manager = get_stream_manager()
-
-        # ..............................................................................
         while True:
             try:
-                logger.info("sending test message...")
-                await publisher.send_multipart([b"mega_test", str(uuid4()).encode()])
-                await asyncio.sleep(3)
+                msg = await publisher.recv()
+
+                logger.info("received message: %s" % msg)
+
+                await manager(
+                    action=msg[0], req=SubscriptionRequest.from_json(msg[1:].decode())
+                )
+
             except asyncio.CancelledError:
                 logger.info("Cancelled...")
                 break
 
             except Exception as e:
                 logger.exception(e)
-                await asyncio.sleep(SLEEP_ON_ERROR)
 
         # tell the manager to pack it up ...
         await manager(b"", None)

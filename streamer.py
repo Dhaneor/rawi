@@ -184,8 +184,8 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 # --------------------------------------------------------------------------------------
 
-from data_sources import zmq_config as cnf  # noqa: F401, E402
-from data_sources.websockets.ws_kucoin import KucoinWebsocketPublic  # noqa: F401, E402
+from rawi import zmq_config as cnf  # noqa: F401, E402
+from rawi.websocket.ws_kucoin import KucoinWebsocketPublic  # noqa: F401, E402
 from util.sequence import sequence  # noqa: F401, E402
 from zmqbricks import registration as rgstr  # noqa: F401, E402
 from zmqbricks import heartbeat as hb  # noqa: F401, E402

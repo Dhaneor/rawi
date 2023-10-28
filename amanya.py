@@ -116,21 +116,14 @@ async def amanya(config: ConfigT):
     poller = zmq.asyncio.Poller()
     poller.register(requests, zmq.POLLIN)
 
-    async with gond.Gond(
-        config=config,
-        ctx=ctx,
-        on_rgstr_success=[partial(publish, socket=publisher)]
-    ) as g:  # noqa: F841
+    on_rgstr_success = [partial(publish, socket=publisher)]
+
+    async with gond.Gond(config=config, on_rgstr_success=on_rgstr_success) as g:
 
         registry = g.kinsfolk
 
         while True:
             try:
-                # logger.info(
-                #     "running at %s ... (%s)",
-                #     config.endpoints.get('registration'),
-                #     config.public_key
-                # )
                 events = dict(await poller.poll(1000))
 
                 if requests in events:
