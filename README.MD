@@ -69,14 +69,17 @@ zmq_config
     be set.
 
 Amanya is the only component that must have a static address, so the
-other components can find it when starting up. Every other component
-will send its address/endpoint information during registration. That
-makes the system dynamic, and new components can be added at any point.
-They can run anywhere, and the other components will still be able
-to find them. The same mechanism ensure that components that components
-that were offline temporarily, will be re-integrated into the system.
-This makes the system very resilient and self-helaing in case of
-failures, server reboots or loss of connectivity.
+other components can find it when starting up.
+
+Every other component will send its address/endpoint information
+during registration. That makes the system dynamic, and new components
+can be added at any point. They can run anywhere, and the other
+components will still be able to find them.
+
+The same mechanism ensures that components have been offline temporarily,
+will be re-integrated into the system. This makes the system very
+resilient and self-healing in case of failures, server reboots or loss
+of connectivity.
 
 Every component can be started as script. But it is also possible to
 combine components by means of a glue script - in case of multiple
