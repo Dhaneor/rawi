@@ -26,11 +26,6 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 # --------------------------------------------------------------------------------------
 
-try:
-    from src.data_sources.listener import CandleEvent
-except ImportError:
-    from data_sources.listener import CandleEvent  # noqa: E402, F401
-
 from .ohlcv_repository import ohlcv_repository  # noqa: E402
 from .util.subscriber_tracker import subscriber_tracker  # noqa: E402, F401
 from . import zmq_config  # noqa: E402
@@ -376,9 +371,7 @@ async def craeft_pond(ctx: Optional[zmq.asyncio.Context] = None, byor: bool = Fa
 
     # start the ohlcv repository (task) if required
     if byor:
-        repo_task = asyncio.create_task(
-            ohlcv_repository(ctx, config.REPO_ADDR)
-        )
+        repo_task = asyncio.create_task(ohlcv_repository(ctx, config.REPO_ADDR))
 
     # initialize variables for the main loop
     get_initial_data_fn = partial(

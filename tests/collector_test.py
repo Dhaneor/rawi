@@ -104,7 +104,7 @@ async def test_client():
 
 async def run_collector():
     ctx = zmq.asyncio.Context.instance()
-    config = Collector("kucoin", ["spot"], "collector")
+    # config = Collector("kucoin", ["spot"], "collector")
 
     try:
         await test_client()
