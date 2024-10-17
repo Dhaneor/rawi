@@ -120,8 +120,6 @@ async def amanya(config: ConfigT):
 
     async with gond.Gond(config=config, on_rgstr_success=on_rgstr_success) as g:
 
-        registry = g.kinsfolk
-
         while True:
             try:
                 events = dict(await poller.poll(1000))
@@ -130,7 +128,7 @@ async def amanya(config: ConfigT):
                     msg = await requests.recv_multipart()
                     key, service_type = msg[0], msg[1].decode()
 
-                    if kinsmen := await registry.get_all(service_type):
+                    if kinsmen := await g.kinsfolk.get_all(service_type):
                         reply = [
                             json.dumps(k.to_scroll().as_dict()).encode()
                             for k in kinsmen

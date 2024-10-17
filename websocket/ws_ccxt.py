@@ -45,10 +45,7 @@ async def main(exchange):
                 #     new_symbol = "ETHA/USDT"
                 #     symbols.append(new_symbol)
 
-                # if counter == 5:
-                #     symbols.append("ETH/USDT")
-
-                tickers = await exchange.watch_ohlcv(symbols[1])
+                tickers = await exchange.watch_ohlcv(symbols[0])
 
                 # if tickers:
                 #     for ticker in tickers.values():
@@ -96,7 +93,7 @@ async def main(exchange):
             "processed %s messages in %s seconds (%s msgs/s)",
             counter, duration, msg_per_sec
         )
-        logger.info("one message every %s milliseconds", sec_per_msg / 1000)
+        logger.info("one message every %s milliseconds", sec_per_msg * 1000)
 
 if __name__ == '__main__':
     try:

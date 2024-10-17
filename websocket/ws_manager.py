@@ -77,7 +77,11 @@ async def filter_request(
         return req if req.topic else None
 
 
-async def watch_subscribe(connections: list, queue: asyncio.Queue, wrapper: Coroutine):
+async def watch_subscribe(
+    connections: list,
+    queue: asyncio.Queue,
+    wrapper: Coroutine
+):
     while True:
         try:
             if req := await filter_request(await queue.get()):
@@ -90,11 +94,16 @@ async def watch_subscribe(connections: list, queue: asyncio.Queue, wrapper: Coro
             logger.error(e, exc_info=1)
 
 
-async def watch_unsubscribe(connections: list, queue: asyncio.Queue, wrapper: Coroutine):
+async def watch_unsubscribe(
+    connections: list,
+    queue: asyncio.Queue,
+    wrapper: Coroutine
+):
     while True:
         try:
             if req := await filter_request(await queue.get()):
-                topic, done = f"{await subject_from_request(req)}:{req.topic}", False
+                topic = f"{await subject_from_request(req)}:{req.topic}"
+                done = False
 
                 for conn in connections:
                     if topic in conn.topics:

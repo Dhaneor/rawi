@@ -25,7 +25,9 @@ async def trades(exchange: ExchangeT, symbol: str, limit: int = 1000):
 
     while True:
         try:
-            data = await exchange.watch_trades(symbol=symbol, since=since, limit=limit)
+            data = await exchange.watch_trades(
+                symbol=symbol, since=since, limit=limit
+                )
         except NetworkError as e:
             print(e)
         except ExchangeNotAvailable as e:

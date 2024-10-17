@@ -3,7 +3,7 @@
 """
 Provides a specialized OHLCV repository for the OHLCV containers.
 
-You cannot set start/end, or the nu,mber of returned values. So, this
+You cannot set start/end, or the number of returned values. So, this
 module is not intended for general purpose use, but only to provide
 the initial data for OHLCV containers
 

@@ -19,7 +19,7 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 # --------------------------------------------------------------------------------------
 
-from data_sources.craeft_pond import ContainerRegistry, OHLCVContainer  # noqa: E402
+from rawi.craeft_pond import ContainerRegistry, OHLCVContainer  # noqa: E402
 
 logger = logging.getLogger("main.stream_manager")
 
