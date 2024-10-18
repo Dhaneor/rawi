@@ -42,7 +42,7 @@ import logging
 from typing import Callable, Optional, Coroutine
 from uuid import uuid4
 
-from kucoin.client import WsToken
+from ..kucoin.kucoin.client import WsToken
 from ..kucoin.kucoin.ws_client import KucoinWsClient
 
 from rawi.websocket.i_websockets import (  # noqa: E402, F401
@@ -138,7 +138,7 @@ class Subscribers:
             return None
 
     def remove_subscriber(self, topic: str) -> int:
-        if topic in self._topics:  # and (subs := self._topics.get(topic, 0)) > 1:
+        if topic in self._topics:
             self._topics[topic] -= 1
             self.logger.info(
                 "... decreased subscribers for: %s (now: %s subscribers)",
@@ -256,13 +256,13 @@ class Connection:
         self._pending = set(topics) - set(too_much)
 
         self.logger.debug(
-            "going to add topics: %s --- too much: %s (increases topics to: %s)",
+            "going to add topics: %s --- too much: %s (current topics: %s)",
             topic_strings,
             too_much,
             self.no_of_topics,
         )
 
-        # increase subscriber number right away (also to prevent new assignments)
+        # increase subscriber number right away
         for topic in self._pending:
             self._topics.add_subscriber(topic)
 
@@ -369,7 +369,7 @@ class Connection:
             if topic in self._topics:
                 self.logger.debug(self._topics)
                 self.logger.debug(
-                    "   %s --> decreasing subscriber count for topic: %s (was: %s)",
+                    "   %s --> decreasing subscriber count for: %s (was: %s)",
                     self.name.upper(),
                     topic,
                     self._topics.get_subscriber_count(topic),
@@ -742,11 +742,7 @@ class WebsocketBase(IWebsocketPublic):
 
         success = all_topics_before == self.topics
 
-        logger.info(
-            "all topics from %s moved to new connection: %s",
-            src_name,
-            success
-        )
+        logger.info("all topics from %s moved to new connection: %s", src_name, success)
 
         if not success:
             raise asyncio.CancelledError("connection switch failed")

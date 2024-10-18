@@ -25,7 +25,7 @@ logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 logger.addHandler(handler)
 formatter = logging.Formatter(
-    "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"
+    "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"  # noqa: E501
 )
 handler.setFormatter(formatter)
 
@@ -57,7 +57,7 @@ async def get_symbols(count):
 
 # random topic generator
 def random_topic():
-    return f"topic_{int(time.time() / 1000 * random() )}"
+    return f"topic_{int(time.time() / 1000 * random())}"
 
 
 # mock publish coroutine
@@ -65,12 +65,14 @@ async def callback(msg):
     logger.info(f"received message: {msg}")
 
 
-# --------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 #                     test methods of SUBSCRIBERS class
 async def test_add_remove_topics(runs=20):
     # create a Topics object
     t = ws.Subscribers()
-    topics = ["topic1", "topic2", "topic3", "topic4", "topic5", "topic6", "topic7"]
+    topics = [
+        "topic1", "topic2", "topic3", "topic4", "topic5", "topic6", "topic7"
+        ]
 
     for _ in range(runs):
         topic = choice(topics)
@@ -156,7 +158,9 @@ async def test_prep_unsub_str():
 
 
 async def test_remove_multiple_subs():
-    topics = ["topic1", "topic2", "topic3", "topic4", "topic5", "topic6", "topic7"]
+    topics = [
+        "topic1", "topic2", "topic3", "topic4", "topic5", "topic6", "topic7"
+        ]
 
     # prepare two test Connection instances
     c1 = ws.Connection(None, "", True)
@@ -230,7 +234,8 @@ async def test_filter_topics():
 async def test_move_topics():
     topics = [
         "topic1", "topic2", "topic3", "topic4", "topic5", "topic6", "topic7",
-        "topic8", "topic9", "topic10", "topic11", "topic12", "topic13", "topic14",
+        "topic8", "topic9", "topic10", "topic11", "topic12", "topic13",
+        "topic14",
     ]
 
     # prepare two test Connection instances
@@ -255,7 +260,9 @@ async def test_move_topics():
     c2_topics_after = {
         k: c2._topics[k] for k in sorted(c2._topics._topics.keys())
     }
-    logger.debug("topics conn 1/2: %s <---> %s" % (c1._topics, c2_topics_after))
+    logger.debug(
+        "topics conn 1/2: %s <---> %s" % (c1._topics, c2_topics_after)
+        )
 
     assert not c1._topics, f"{c1._topics} != " + "{}"
     assert c2.topics.sort() == topics.sort(), f"{c2.topics} != {topics}"
