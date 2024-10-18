@@ -45,7 +45,7 @@ from uuid import uuid4
 from kucoin.client import WsToken
 from ..kucoin.kucoin.ws_client import KucoinWsClient
 
-from data_sources.websocket.i_websockets import (  # noqa: E402, F401
+from rawi.websocket.i_websockets import (  # noqa: E402, F401
     IWebsocketPublic,
     IWebsocketPrivate,
     ITrades,
@@ -62,9 +62,9 @@ from .publishers import (  # noqa: E402, F401
     ZeroMqPublisher,
     PrintPublisher,
 )
-from data_sources.util.random_names import random_celtic_name
-from data_sources.util.rate_limiter import async_rate_limiter as rate_limiter
-from data_sources.util.subscription_request import SubscriptionRequest  # noqa: F401
+from rawi.util.random_names import random_celtic_name
+from rawi.util.rate_limiter import async_rate_limiter as rate_limiter
+from rawi.util.subscription_request import SubscriptionRequest  # noqa: F401
 
 logger = logging.getLogger("main.websocket")
 
@@ -82,11 +82,11 @@ MAX_BATCH_SUBSCRIPTIONS = 5  # 100 topics
 MAX_TOPICS_PER_CONNECTION = 300  # 300 topics
 
 
-# ======================================================================================
-#                            WS CLIENTS PUBLIC API (NEW)                               #
-# ======================================================================================
+# ============================================================================
+#                            WS CLIENTS PUBLIC API (NEW)                     #
+# ============================================================================
 class Subscribers:
-    """Helper class to keep track of the number of subscribers for each topic."""
+    """Helper class to keep track of the no. of subscribers for each topic."""
 
     def __init__(self, logger: logging.Logger) -> None:
         self.logger = logger

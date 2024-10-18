@@ -10,11 +10,15 @@ import ccxt.pro as ccxt
 import logging
 import sys
 import time
-
 from os.path import dirname as dir
 from random import choice, random
 
 sys.path.append(dir(dir(dir(__file__))))
+# sys.path.insert(0, dir(dir(dir(__file__))))
+
+print(sys.path)
+
+from rawi.websocket import ws_kucoin as ws  # noqa: E402
 
 logger = logging.getLogger('main')
 logger.setLevel(logging.DEBUG)
@@ -24,8 +28,6 @@ formatter = logging.Formatter(
     "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"
 )
 handler.setFormatter(formatter)
-
-import data_sources.websockets.ws_kucoin as ws  # noqa: E402
 
 
 # symbols downloader

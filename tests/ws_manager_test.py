@@ -14,16 +14,16 @@ from random import choice
 
 sys.path.insert(0, dir(dir(dir(__file__))))
 
-from data_sources.websocket.ws_manager import ws_manager  # noqa: E402
-from data_sources.util.subscription_request import SubscriptionRequest  # noqa: E402
-from data_sources.util.enums import SubscriptionType, MarketType  # noqa: E402
+from rawi.websocket.ws_manager import ws_manager  # noqa: E402
+from rawi.util.subscription_request import SubscriptionRequest  # noqa: E402
+from rawi.util.enums import SubscriptionType, MarketType  # noqa: E402
 
 logger = logging.getLogger('main')
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 logger.addHandler(handler)
 formatter = logging.Formatter(
-    "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"
+    "%(asctime)s - %(name)s.%(funcName)s.%(lineno)d  - [%(levelname)s]: %(message)s"  # noqa: E501
 )
 handler.setFormatter(formatter)
 
@@ -41,7 +41,7 @@ async def mock_client():
         try:
             q = choice([sub_q, unsub_q]) if subbed else sub_q
             symbol = (
-                choice(symbols) if q == sub_q else choice(subbed) if subbed else ""
+                choice(symbols) if q == sub_q else choice(subbed) if subbed else ""  # noqa: E501
             )
 
             req = SubscriptionRequest(
