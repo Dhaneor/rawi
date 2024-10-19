@@ -3,9 +3,28 @@
 """
 Provides a specialized OHLCV repository for the OHLCV containers.
 
+classes
+    None
+
+functions
+    ohlcv_repository
+
+    This is the only function that needs to be used/called to start the
+    repository which can be accessed by clients via its ZeroMQ socket.
+    All other functions in this module support this main function.
+
+    Parameters
+        ctx Optional[zmq.asyncio.Context]
+            a ZeroMQ Context object, only necessary if multiple ZerOMQ
+            connections/functions are running in the same thread;
+            otherwise THE Context will be initialized and managed here
+        addr: Optional[str]
+            the 0MQ address to connect to
+
 You cannot set start/end, or the number of returned values. So, this
-module is not intended for general purpose use, but only to provide
-the initial data for OHLCV containers
+module is not intended for general purpose use, it will always return
+the n most recent candlestick values for the SPOT market on given
+exchange (n depends on the exchange but will usually equal 1000).
 
 The configuration can be changed in the zmq_config.py file which must
 be in the same directory as this file.
@@ -102,6 +121,8 @@ exchange_factory = exchange_factory_fn()
 async def get_ohlcv(exchange_name: str, symbol: str, interval: str) -> list:
     """Get OHLCV data for a given exchange, symbol and interval.
 
+    NOTE: This will always return the data for the SPOT market (not FUTURES)!
+
     Parameters
     ----------
     exchange_name : str
@@ -118,13 +139,14 @@ async def get_ohlcv(exchange_name: str, symbol: str, interval: str) -> list:
     list
         List of OHLCV data | empty list if unsuccessful
     """
-    res = []
-    start = time.time()
+    res, start = [], time.time()
 
+    # get an exchange instance, return empty result if unsuccessful
     if not (exchange := await exchange_factory(exchange_name)):
         logger.error("unable to get exchange for: %s", exchange_name)
         return res
 
+    # check if the exchange supports fetch_ohlcv method, return empty result if not
     if not hasattr(exchange, "fetch_ohlcv"):
         logger.error("exchange %s does not support fetch_ohlcv", exchange.id)
         return res
@@ -132,6 +154,7 @@ async def get_ohlcv(exchange_name: str, symbol: str, interval: str) -> list:
     logger.debug("-------------------------------------------------------------------")
     logger.debug("... fetching OHLCV data for %s %s", symbol, interval)
 
+    # Fetch OHLCV data from the exchange
     try:
         res = await exchange.fetch_ohlcv(
             symbol=symbol, timeframe=interval, limit=KLINES_LIMIT
@@ -164,9 +187,8 @@ async def get_ohlcv(exchange_name: str, symbol: str, interval: str) -> list:
         )
     finally:
         if res:
-
+            # log the successfully processed request
             exc_time = round((time.time() - start) * 1000)
-
             logger.debug(
                 "... fetched %s elements for %s %s in %s ms: OK",
                 len(res), symbol, interval, exc_time

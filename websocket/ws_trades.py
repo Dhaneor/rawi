@@ -56,7 +56,7 @@ if __name__ == '__main__':
     try:
         asyncio.run(trades(exchange, "BTC/USDT"))
     except KeyboardInterrupt:
-        print('Interrupted...')
         exchange.close()
+        print('Interrupted...')
         time.sleep(1)
         print("shutdown completed: OK")
