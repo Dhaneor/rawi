@@ -43,14 +43,119 @@ import time
 import zmq
 import zmq.asyncio
 
-from ccxt.base.errors import BadSymbol, ExchangeNotAvailable
+from dataclasses import dataclass
+from ccxt.base.errors import BadSymbol
 from typing import Optional
 
 logger = logging.getLogger("main.ohlcv_repository")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
 
 DEFAULT_ADDRESS = "inproc://ohlcv_repository"
-KLINES_LIMIT = 1000
+KLINES_LIMIT = 10
+
+# ====================================================================================
+
+
+@dataclass
+class Response:
+    exchange: str = None
+    symbol: str = None
+    interval: str = None
+    socket: object = None
+    id: str = None
+    success: bool = True
+    data: list = None
+    _exchange_error: bool = False
+    _fetch_ohlcv_not_available: bool = False
+    _symbol_error: bool = False
+    _interval_error: bool = False
+    _network_error: bool = False
+
+    @property
+    def exchange_error(self):
+        return self._exchange_error
+
+    @exchange_error.setter
+    def exchange_error(self, value):
+        self._exchange_error = value
+        if value:
+            self.success = False
+
+    @property
+    def fetch_ohlcv_not_available(self):
+        return self._fetch_ohlcv_not_available
+
+    @fetch_ohlcv_not_available.setter
+    def fetch_ohlcv_not_available(self, value):
+        self._fetch_ohlcv_not_available = value
+        if value:
+            self.success = False
+
+    @property
+    def symbol_error(self):
+        return self._symbol_error
+
+    @symbol_error.setter
+    def symbol_error(self, value):
+        self._symbol_error = value
+        if value:
+            self.success = False
+
+    @property
+    def interval_error(self):
+        return self._interval_error
+
+    @interval_error.setter
+    def interval_error(self, value):
+        self._interval_error = value
+        if value:
+            self.success = False
+
+    @property
+    def network_error(self):
+        return self._network_error
+
+    @network_error.setter
+    def network_error(self, value):
+        self._network_error = value
+        if value:
+            self.success = False
+
+    def __post_init__(self):
+        # Basic checks on instantiation
+        if not isinstance(self.exchange, str):
+            self.exchange_error = True
+            self.success = False
+        if not isinstance(self.symbol, str):
+            self.symbol_error = True
+            self.success = False
+        if not isinstance(self.interval, str):
+            self.interval_error = True
+            self.success = False
+
+    async def send(self):
+        # Create the response payload based on the current state of the object
+        response = {
+            "exchange": self.exchange,
+            "symbol": self.symbol,
+            "interval": self.interval,
+            "success": self.success,
+            "data": self.data,
+            "errors": {
+                "exchange_error": self.exchange_error,
+                "fetch_ohlcv_not_available": self.fetch_ohlcv_not_available,
+                "symbol_error": self.symbol_error,
+                "interval_error": self.interval_error,
+                "network_error": self.network_error
+            }
+        }
+        # Send the response back through the socket
+        logger.debug("sending response: %s", response)
+        await self.socket.send_multipart(
+            [self.id, b'', json.dumps(response).encode('utf-8')]
+        )
+        logger.debug("Response sent successfully.")
 
 
 def exchange_factory_fn():
@@ -118,86 +223,72 @@ def exchange_factory_fn():
 exchange_factory = exchange_factory_fn()
 
 
-async def get_ohlcv(exchange_name: str, symbol: str, interval: str) -> list:
+async def get_ohlcv(response: Response) -> None:
     """Get OHLCV data for a given exchange, symbol and interval.
 
     NOTE: This will always return the data for the SPOT market (not FUTURES)!
 
     Parameters
     ----------
-    exchange_name : str
-        Name of the exchange
-
-    symbol : str
-        Symbol to fetch OHLCV data for
-
-    interval : str
-        Interval to fetch OHLCV data for
+    response
 
     Returns
     -------
-    list
-        List of OHLCV data | empty list if unsuccessful
+    None
     """
     res, start = [], time.time()
 
     # get an exchange instance, return empty result if unsuccessful
-    if not (exchange := await exchange_factory(exchange_name)):
-        logger.error("unable to get exchange for: %s", exchange_name)
-        return res
+    if not (exchange := await exchange_factory(response.exchange)):
+        logger.error("[ExchangeNotAvailable] %s", response.exchange)
+        response.exchange_error = True
+        return response
 
     # check if the exchange supports fetch_ohlcv method, return empty result if not
     if not hasattr(exchange, "fetch_ohlcv"):
         logger.error("exchange %s does not support fetch_ohlcv", exchange.id)
-        return res
+        response.fetch_ohlcv_not_available = True
+        return response
 
     logger.debug("-------------------------------------------------------------------")
-    logger.debug("... fetching OHLCV data for %s %s", symbol, interval)
+    logger.debug("... fetching OHLCV for %s %s", response.symbol, response.interval)
 
     # Fetch OHLCV data from the exchange
     try:
         res = await exchange.fetch_ohlcv(
-            symbol=symbol, timeframe=interval, limit=KLINES_LIMIT
+            symbol=response.symbol, timeframe=response.interval, limit=KLINES_LIMIT
         )
-    except ExchangeNotAvailable as e:
-        logger.error(
-            "[ExchangeNotAvailable] unable to fetch raw datafor %s %s -> %s",
-            symbol,
-            interval,
-            e,
-        )
-    except BadSymbol as e:
-        logger.error(
-            "[BadSymbol] unable to fetch raw data for %s %s -> %s",
-            symbol,
-            interval,
-            e,
-        )
+    except BadSymbol:
+        logger.error("[BadSymbol] %s ", response.symbol)
+        response.symbol_error = True
     except asyncio.CancelledError:
         logger.error(
-            "[CancelledError] unable to fetch raw data for %s %s", symbol, interval
+            "[CancelledError] unable to fetch raw data for %s %s",
+            response.symbol, response.interval
         )
     except Exception as e:
         logger.error(
             "[Exception] unable to fetch raw data for %s %s -> %s",
-            symbol,
-            interval,
-            e,
-            exc_info=True,
+            response.symbol, response.interval, e, exc_info=True,
         )
+        response.network_error = True
+    else:
+        logger.info(
+            "... fetched %s elements for %s %s in %s ms: OK",
+            len(res), response.symbol, response.interval,
+            round((time.time() - start) * 1000)
+        )
+        # convert the result, so that the sublists correspond to OHLCV
+        response.data = res
+        # response.data = list(zip(*res))
     finally:
-        if res:
-            # log the successfully processed request
-            exc_time = round((time.time() - start) * 1000)
-            logger.debug(
-                "... fetched %s elements for %s %s in %s ms: OK",
-                len(res), symbol, interval, exc_time
-            )
-        return res
+        return response
 
 
-async def send_ohlcv(data: list, socket: zmq.asyncio.Socket, id_: bytes) -> None:
-    await socket.send_multipart([id_, (json.dumps(data)).encode()])
+# async def send_ohlcv(data: list, socket: zmq.asyncio.Socket, id_: bytes) -> None:
+#     logger.debug("sending data with %s elements", len(data))
+#     await socket.send_multipart([id_, b'', (json.dumps(data)).encode()])
+#     logger.debug("done")
 
 
 async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> None:
@@ -214,14 +305,21 @@ async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> 
     id_: bytes
         caller identity of the request
     """
-    # fetch the raw data
-    raw = await get_ohlcv(req.get("exchange"), req.get("symbol"), req.get("interval"))
+    # Create a Response object with the request details
+    response = Response(
+        exchange=req.get("exchange"),
+        symbol=req.get("symbol"),
+        interval=req.get("interval"),
+        socket=socket,
+        id=id_
+    )
 
-    # transpose the raw data, so the sublists represent 'open' ...'volume'
-    data = list(zip(*raw)) if raw else []
+    logger.info(response)
 
-    # send it back to the client
-    await send_ohlcv(data, socket, id_)
+    if response.success:
+        response = await get_ohlcv(response)
+
+    await response.send()
 
 
 async def ohlcv_repository(
@@ -230,15 +328,12 @@ async def ohlcv_repository(
 ):
     """Start the OHLCV repository.
 
-    Clients can request OHLCV data by sending a multipart message.
+    Clients can request OHLCV data by sending a (JSON encoded) dictionary.
 
     example:
 
     ..code-block:: python
-        [
-            b'client identity',
-            {"exchange": "binance", "symbol": "BTC/USDT", "interval": "1m"}
-        ]
+        {"exchange": "binance", "symbol": "BTC/USDT", "interval": "1m"}
 
     Parameters
     ----------
@@ -270,11 +365,12 @@ async def ohlcv_repository(
 
             if requests in events:
                 msg = await requests.recv_multipart()
-                identity, request = msg[0], msg[1]
+                logger.debug("received message: %s", msg)
+                identity, request = msg[0], msg[2].decode()
 
                 logger.info("received request: %s from %s", request, identity)
 
-                request = json.loads(request.decode())
+                request = json.loads(request)
 
                 # stop operation if we got a 'close' command
                 if request.get("action") == "close":
@@ -294,8 +390,11 @@ async def ohlcv_repository(
             except Exception:
                 pass
 
-            logger.exception(e)
+            logger.exception(e, exc_info=False)
+            logger.info("task cancelled -> closing exchange ...")
+
             await requests.send_json([])
+            break
 
     # cleanup
     await exchange_factory(None)
