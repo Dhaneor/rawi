@@ -44,11 +44,11 @@ import zmq
 import zmq.asyncio
 
 from dataclasses import dataclass
-from ccxt.base.errors import BadSymbol
+from ccxt.base.errors import BadSymbol, BadRequest
 from typing import Optional
 
 logger = logging.getLogger("main.ohlcv_repository")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 DEFAULT_ADDRESS = "inproc://ohlcv_repository"
@@ -64,7 +64,6 @@ class Response:
     interval: str = None
     socket: object = None
     id: str = None
-    success: bool = True
     data: list = None
     _exchange_error: bool = False
     _fetch_ohlcv_not_available: bool = False
@@ -77,62 +76,62 @@ class Response:
         return self._exchange_error
 
     @exchange_error.setter
-    def exchange_error(self, value):
+    def exchange_error(self, value: bool):
         self._exchange_error = value
-        if value:
-            self.success = False
 
     @property
     def fetch_ohlcv_not_available(self):
         return self._fetch_ohlcv_not_available
 
     @fetch_ohlcv_not_available.setter
-    def fetch_ohlcv_not_available(self, value):
+    def fetch_ohlcv_not_available(self, value: bool):
         self._fetch_ohlcv_not_available = value
-        if value:
-            self.success = False
 
     @property
     def symbol_error(self):
         return self._symbol_error
 
     @symbol_error.setter
-    def symbol_error(self, value):
+    def symbol_error(self, value: bool):
         self._symbol_error = value
-        if value:
-            self.success = False
 
     @property
     def interval_error(self):
         return self._interval_error
 
     @interval_error.setter
-    def interval_error(self, value):
+    def interval_error(self, value: bool):
         self._interval_error = value
-        if value:
-            self.success = False
 
     @property
     def network_error(self):
         return self._network_error
 
     @network_error.setter
-    def network_error(self, value):
-        self._network_error = value
-        if value:
-            self.success = False
+    def network_error(self, value: bool) -> None:
+        self._network_error = True
+
+    @property
+    def bad_request(self) -> bool:
+        if any(
+            e for e in (self.exchange_error, self.symbol_error, self.interval_error)
+        ):
+            return True
+        else:
+            return False
+
+    @property
+    def success(self) -> bool:
+        if (self.bad_request or self.network_error or self.fetch_ohlcv_not_available):
+            return False
+        else:
+            return True
 
     def __post_init__(self):
         # Basic checks on instantiation
-        if not isinstance(self.exchange, str):
-            self.exchange_error = True
-            self.success = False
-        if not isinstance(self.symbol, str):
-            self.symbol_error = True
-            self.success = False
-        if not isinstance(self.interval, str):
-            self.interval_error = True
-            self.success = False
+        self.exchange_error = True if not isinstance(self.exchange, str) else False
+        self.symbol_error = True if not isinstance(self.symbol, str) else False
+        self.interval_error = True if not isinstance(self.interval, str) else False
 
     async def send(self):
         # Create the response payload based on the current state of the object
@@ -142,6 +141,7 @@ class Response:
             "interval": self.interval,
             "success": self.success,
             "data": self.data,
+            "bad_request": self.bad_request,
             "errors": {
                 "exchange_error": self.exchange_error,
                 "fetch_ohlcv_not_available": self.fetch_ohlcv_not_available,
@@ -151,11 +151,9 @@ class Response:
             }
         }
         # Send the response back through the socket
-        logger.debug("sending response: %s", response)
         await self.socket.send_multipart(
             [self.id, b'', json.dumps(response).encode('utf-8')]
         )
-        logger.debug("Response sent successfully.")
 
 
 def exchange_factory_fn():
@@ -170,7 +168,7 @@ def exchange_factory_fn():
 
         Parameters
         ----------
-        exchange_name : str, optional
+        exchange_name : str, Optional
             Name of the exchange to get an instance of, by default None
 
         Returns
@@ -182,7 +180,7 @@ def exchange_factory_fn():
 
         exchange_name = exchange_name.lower() if exchange_name else None
 
-        # close exchange if it exists
+        # exchange close request -> close active exchange instance
         if not exchange_name and exchange_instance:
             logger.info("closing exchange: %s", exchange_instance.id)
             await exchange_instance.close()
@@ -191,7 +189,7 @@ def exchange_factory_fn():
 
         # exchange close request, but no active exchange instance
         if not exchange_name and not exchange_instance:
-            logger.error("no exchange requested")
+            logger.warning("no exchange requested")
             return None
 
         # return cached exchange if the same exchange is requested again
@@ -208,13 +206,13 @@ def exchange_factory_fn():
         # create a new exchange instance
         logger.info("instantiating  exchange: %s", exchange_name)
         try:
-            exchange = getattr(ccxt, exchange_name)({"enableRateLimit": False})
+            exchange = getattr(ccxt, exchange_name)({"enableRateLimit": True})
         except AttributeError as e:
             logger.error("exchange %s does not exist (%s)", exchange_name.upper(), e)
             exchange = None
-
-        finally:
+        else:
             exchange_instance = exchange
+        finally:
             return exchange
 
     return get_exchange
@@ -261,6 +259,9 @@ async def get_ohlcv(response: Response) -> None:
     except BadSymbol:
         logger.error("[BadSymbol] %s ", response.symbol)
         response.symbol_error = True
+    except BadRequest as e:
+        logger.error("[BadRequest] %s (%s)", response.interval, e)
+        response.interval_error = True
     except asyncio.CancelledError:
         logger.error(
             "[CancelledError] unable to fetch raw data for %s %s",
@@ -278,17 +279,11 @@ async def get_ohlcv(response: Response) -> None:
             len(res), response.symbol, response.interval,
             round((time.time() - start) * 1000)
         )
-        # convert the result, so that the sublists correspond to OHLCV
         response.data = res
+        # convert the result, so that the sublists correspond to OHLCV
         # response.data = list(zip(*res))
     finally:
         return response
-
-
-# async def send_ohlcv(data: list, socket: zmq.asyncio.Socket, id_: bytes) -> None:
-#     logger.debug("sending data with %s elements", len(data))
-#     await socket.send_multipart([id_, b'', (json.dumps(data)).encode()])
-#     logger.debug("done")
 
 
 async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> None:
@@ -315,6 +310,7 @@ async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> 
     )
 
     logger.info(response)
+    logger.debug(response.success)
 
     if response.success:
         response = await get_ohlcv(response)
@@ -372,12 +368,6 @@ async def ohlcv_repository(
 
                 request = json.loads(request)
 
-                # stop operation if we got a 'close' command
-                if request.get("action") == "close":
-                    logger.info("received close request -> exiting ...")
-                    await requests.send_json([])
-                    raise asyncio.CancelledError()
-
                 # process request in the background
                 asyncio.create_task(process_request(request, requests, identity))
 
@@ -385,12 +375,7 @@ async def ohlcv_repository(
             logger.info("task cancelled -> closing exchange ...")
             break
         except Exception as e:
-            try:
-                e = e.split("\n")[0]
-            except Exception:
-                pass
-
-            logger.exception(e, exc_info=False)
+            logger.exception(e, exc_info=True)
             logger.info("task cancelled -> closing exchange ...")
 
             await requests.send_json([])

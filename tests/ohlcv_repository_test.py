@@ -78,6 +78,7 @@ class TestOHLCVRepository(unittest.TestCase):
                 {"exchange": "binance", "symbol": "BTC/USDT", "interval": "1d"},
                 {"exchange": "kraken", "symbol": "ETH/USD", "interval": "4h"},
                 {"exchange": "kucoin", "symbol": "LTC/USDT", "interval": "1h"},
+                {"exchange": "kucoin", "symbol": "BTC/USDT", "interval": "4h"}
             ]
             responses = await self.zmq_client(requests)
 
@@ -114,6 +115,28 @@ class TestOHLCVRepository(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_non_existent_interval(self):
+        """Test sending requests with an invalid interval."""
+        logger.debug("----------------------------------------------------------------")
+        logger.debug(">>>>> Test sending requests with an invalid interval")
+
+        async def run_test():
+            requests = [
+                {"exchange": "binance", "symbol": "BTC/USDT", "interval": "14h"}
+            ]
+            responses = await self.zmq_client(requests)
+
+            for response in responses:
+                self.assertFalse(
+                    response["success"], "Invalid interval should return success=False"
+                )
+                self.assertTrue(
+                    response["errors"]["interval_error"],
+                    "Invalid interval should return an interval_error",
+                )
+
+        self.loop.run_until_complete(run_test())
+
     def test_non_existent_pair(self):
         """Test sending requests with a non-existent trading pair."""
         logger.debug("----------------------------------------------------------------")
@@ -128,11 +151,11 @@ class TestOHLCVRepository(unittest.TestCase):
             for response in responses:
                 self.assertFalse(
                     response["success"],
-                    "Non-existent trading pair should return success=False"
+                    f"Non-existent trading pair should return success=False - %s" % response
                 )
                 self.assertTrue(
                     response["errors"]["symbol_error"],
-                    "Non-existent pair should return a symbol_error",
+                    "Non-existent pair should return a symbol_error - %s" % response,
                 )
 
         self.loop.run_until_complete(run_test())
