@@ -59,6 +59,12 @@ KLINES_LIMIT = 10
 
 @dataclass
 class Response:
+    """Response class.
+
+    This class standardizes the response, does type checks for the values from
+    the request, and includes a method for sending the response after fetching
+    the OHLCV data (including some error flags for the client).
+    """
     exchange: str = None
     symbol: str = None
     interval: str = None
