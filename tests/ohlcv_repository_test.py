@@ -151,7 +151,8 @@ class TestOHLCVRepository(unittest.TestCase):
             for response in responses:
                 self.assertFalse(
                     response["success"],
-                    f"Non-existent trading pair should return success=False - %s" % response
+                    "Non-existent trading pair should return success=False - %s",
+                    response
                 )
                 self.assertTrue(
                     response["errors"]["symbol_error"],
