@@ -37,6 +37,7 @@ import asyncio
 
 # import ccxt.async_support as ccxt
 import ccxt.pro as ccxt
+import functools
 import json
 import logging
 import time
@@ -44,15 +45,21 @@ import zmq
 import zmq.asyncio
 
 from dataclasses import dataclass
-from ccxt.base.errors import BadSymbol, BadRequest
-from typing import Optional
+from ccxt.base.errors import (
+    BadSymbol, BadRequest, AuthenticationError,
+    InsufficientFunds, NetworkError,
+    ExchangeNotAvailable, RequestTimeout,
+    )
+from typing import Optional, Dict, Tuple
 
 logger = logging.getLogger("main.ohlcv_repository")
-logger.setLevel(logging.DEBUG)
 
 
 DEFAULT_ADDRESS = "inproc://ohlcv_repository"
-KLINES_LIMIT = 10
+KLINES_LIMIT = 1000
+MAX_RETRIES = 3
+RETRY_DELAY = 5.0
+RUNNING_CLEANUP = False
 
 # ====================================================================================
 
@@ -70,12 +77,37 @@ class Response:
     interval: str = None
     socket: object = None
     id: str = None
-    data: list = None
+    data: list | None = None
+    _bad_request_error: bool = False
+    _authentication_error: bool = False
     _exchange_error: bool = False
     _fetch_ohlcv_not_available: bool = False
     _symbol_error: bool = False
     _interval_error: bool = False
     _network_error: bool = False
+
+    def __repr__(self):
+        data = f"{len(self.data)} klines" if self.data else None
+
+        return f"Response(exchange={self.exchange}, symbol={self.symbol}, " \
+               f"interval={self.interval}, success={self.success}, data={data}, "\
+               f"bad_request={self.bad_request}"\
+               f"errors={self.errors or None})"
+
+    @property
+    def errors(self):
+        return {
+            attr: getattr(self, attr) for attr in dir(self)
+            if attr.startswith("_") and "error" in attr and getattr(self, attr)
+        }
+
+    @property
+    def authentication_error(self):
+        return self._authentication_error
+
+    @authentication_error.setter
+    def authentication_error(self, value: bool):
+        self._authentication_error = value
 
     @property
     def exchange_error(self):
@@ -119,19 +151,23 @@ class Response:
 
     @property
     def bad_request(self) -> bool:
-        if any(
-            e for e in (self.exchange_error, self.symbol_error, self.interval_error)
-        ):
-            return True
-        else:
-            return False
+        return True if any(
+            (
+                self._bad_request_error,
+                self._authentication_error,
+                self._exchange_error,
+                self._symbol_error,
+                self._interval_error,
+            )
+        ) else False
+
+    @bad_request.setter
+    def bad_request(self, value: bool) -> None:
+        self._bad_request_error = value
 
     @property
     def success(self) -> bool:
-        if (self.bad_request or self.network_error or self.fetch_ohlcv_not_available):
-            return False
-        else:
-            return True
+        return False if self.bad_request else True
 
     def __post_init__(self):
         # Basic checks on instantiation
@@ -148,14 +184,19 @@ class Response:
             "success": self.success,
             "data": self.data,
             "bad_request": self.bad_request,
-            "errors": {
-                "exchange_error": self.exchange_error,
-                "fetch_ohlcv_not_available": self.fetch_ohlcv_not_available,
-                "symbol_error": self.symbol_error,
-                "interval_error": self.interval_error,
-                "network_error": self.network_error
-            }
+            "errors": self.errors or None,
         }
+
+        # prevent crashes due to unserializable values
+        for k, v in response.items():
+            try:
+                json.dumps(v)
+            except Exception as e:
+                logger.warning(f"Could not serialize {k} value: {v} ({e})")
+                response[k] = None
+                response["errors"][k] = str(e)
+                response["success"] = False
+
         # Send the response back through the socket
         await self.socket.send_multipart(
             [self.id, b'', json.dumps(response).encode('utf-8')]
@@ -163,13 +204,13 @@ class Response:
 
 
 def exchange_factory_fn():
-    exchange_instance = None
+    exchange_instances = {}
 
     async def get_exchange(exchange_name: Optional[str] = None) -> object | None:
         """Get a working exchange instance
 
-        Call it with None (or without a parameter) to close the
-        current exchange instance, which is required by CCXT
+        Call it with None (or without a parameter) to close
+        all current exchange instances, which is required by CCXT
         before quitting.
 
         Parameters
@@ -182,55 +223,131 @@ def exchange_factory_fn():
         object | None
             An exchange instance, or None if the exchange does not exist
         """
-        nonlocal exchange_instance
+        nonlocal exchange_instances
+        global RUNNING_CLEANUP
 
-        exchange_name = exchange_name.lower() if exchange_name else None
+        if exchange_name:
+            exchange_name = exchange_name.lower()
 
-        # exchange close request -> close active exchange instance
-        if not exchange_name and exchange_instance:
-            logger.info("closing exchange: %s", exchange_instance.id)
-            await exchange_instance.close()
-            exchange_instance = None
+        # Close all exchanges request
+        if exchange_name is None:
+            for name, instance in exchange_instances.items():
+                logger.info(f"Closing exchange: {name}")
+                await instance.close()
+            exchange_instances.clear()
             return None
 
-        # exchange close request, but no active exchange instance
-        if not exchange_name and not exchange_instance:
-            logger.warning("no exchange requested")
-            return None
+        # Return cached exchange if it exists
+        if exchange_name in exchange_instances:
+            logger.debug(f"Returning cached exchange for: {exchange_name}")
+            return exchange_instances[exchange_name]
 
-        # return cached exchange if the same exchange is requested again
-        if exchange_instance is not None and exchange_name == exchange_instance.id:
-            logger.debug("returning cached exchange for: %s", exchange_instance.id)
-            return exchange_instance
-
-        # close existing exchange instance if a different exchange is requested
-        if exchange_instance is not None and exchange_name != exchange_instance.id:
-            logger.debug("closing exchange: %s", exchange_instance.id)
-            await exchange_instance.close()
-            exchange_instance = None
-
-        # create a new exchange instance
-        logger.info("instantiating  exchange: %s", exchange_name)
+        # Create a new exchange instance
+        logger.info(f"Instantiating exchange: {exchange_name}")
         try:
             exchange = getattr(ccxt, exchange_name)({"enableRateLimit": True})
-        except AttributeError as e:
-            logger.error("exchange %s does not exist (%s)", exchange_name.upper(), e)
-            exchange = None
-        else:
-            exchange_instance = exchange
-        finally:
+            exchange_instances[exchange_name] = exchange
             return exchange
+        except AttributeError as e:
+            logger.error(f"Exchange {exchange_name.upper()} does not exist ({e})")
+            return None
 
     return get_exchange
 
 
+# instantiate the exchange factory function
 exchange_factory = exchange_factory_fn()
 
 
+# ====================================================================================
+def cache_ohlcv(ttl_seconds: int = 60):
+    """
+    Decorator function to cache OHLCV (Open, High, Low, Close, Volume) data.
+
+    This decorator implements a caching mechanism for OHLCV data. It stores the
+    results of the decorated function in a dictionary, using a tuple of
+    (exchange, symbol, interval) as the key. If the same request is made again,
+    it returns the cached data instead of calling the original function.
+
+    Parameters:
+    func (callable): The function to be decorated. It should be an asynchronous
+                     function that takes a Response object as an argument and
+                     returns a Response object.
+
+    Returns:
+    callable: A wrapper function that implements the caching logic.
+
+    The wrapper function:
+    - Takes a Response object as an argument.
+    - Returns a Response object, either from the cache or by calling the
+      original function.
+    """
+    def decorator(func):
+        ohlcv_cache: Dict[Tuple[str, str, str], Tuple[Dict, float]] = {}
+
+        @functools.wraps(func)
+        async def wrapper(response: Response) -> Response:
+            start_time = time.time()
+            current_time = start_time
+
+            # Clean expired cache entries
+            expired_keys = [
+                key for key, (_, timestamp) in ohlcv_cache.items()
+                if current_time - timestamp > ttl_seconds
+            ]
+            for key in expired_keys:
+                del ohlcv_cache[key]
+
+            cache_key = (response.exchange, response.symbol, response.interval)
+
+            if cache_key in ohlcv_cache:
+                cached_data, timestamp = ohlcv_cache[cache_key]
+                if current_time - timestamp <= ttl_seconds:
+                    logger.info(f"Returning cached OHLCV data for {cache_key}")
+                    response.data = cached_data
+                    response.cached = True
+                    execution_time = (time.time() - start_time) * 1000
+                    logger.info(
+                        f"Fetched {len(response.data)} elements for "
+                        f"{response.symbol} {response.interval} "
+                        f"in {execution_time:.2f} ms: OK (cached)"
+                    )
+                    return response
+
+            for attempt in range(MAX_RETRIES):
+                try:
+                    result = await func(response)
+                    if result.data:
+                        ohlcv_cache[cache_key] = (result.data, current_time)
+                        logger.info(f"Cached OHLCV data for {cache_key}")
+                    break
+                except (NetworkError, ExchangeNotAvailable, RequestTimeout) as e:
+                    if attempt == MAX_RETRIES - 1:
+                        logger.error(f"Max retries reached for {cache_key}: {str(e)}")
+                        result = response
+                        result.network_error = str(e)
+                    else:
+                        logger.warning(
+                            f"Retry {attempt + 1} for {cache_key} due to: {str(e)}"
+                            )
+                        await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+
+            execution_time = (time.time() - start_time) * 1000
+            logger.info(
+                f"Fetched {len(result.data) if result.data else None} elements for "
+                f"{result.symbol} {result.interval} "
+                f"in {execution_time:.2f} ms: {'OK' if result.data else 'FAILED'}"
+            )
+
+            return result
+
+        return wrapper
+    return decorator
+
+
+@cache_ohlcv()
 async def get_ohlcv(response: Response) -> None:
     """Get OHLCV data for a given exchange, symbol and interval.
-
-    NOTE: This will always return the data for the SPOT market (not FUTURES)!
 
     Parameters
     ----------
@@ -238,58 +355,42 @@ async def get_ohlcv(response: Response) -> None:
 
     Returns
     -------
-    None
+    Response
     """
-    res, start = [], time.time()
+    exchange = await exchange_factory(response.exchange)
 
-    # get an exchange instance, return empty result if unsuccessful
-    if not (exchange := await exchange_factory(response.exchange)):
-        logger.error("[ExchangeNotAvailable] %s", response.exchange)
-        response.exchange_error = True
+    if not exchange:
+        response.exchange_error = f"Exchange {response.exchange} not available"
         return response
 
-    # check if the exchange supports fetch_ohlcv method, return empty result if not
     if not hasattr(exchange, "fetch_ohlcv"):
-        logger.error("exchange %s does not support fetch_ohlcv", exchange.id)
         response.fetch_ohlcv_not_available = True
         return response
 
-    logger.debug("-------------------------------------------------------------------")
-    logger.debug("... fetching OHLCV for %s %s", response.symbol, response.interval)
-
-    # Fetch OHLCV data from the exchange
     try:
-        res = await exchange.fetch_ohlcv(
+        response.data = await exchange.fetch_ohlcv(
             symbol=response.symbol, timeframe=response.interval, limit=KLINES_LIMIT
         )
-    except BadSymbol:
-        logger.error("[BadSymbol] %s ", response.symbol)
-        response.symbol_error = True
+    except AuthenticationError as e:
+        logger.error(f"[AuthenticationError] {str(e)}")
+        response.authentication_error = str(e)
+    except BadSymbol as e:
+        logger.error(f"[BadSymbol] {str(e)}")
+        response.symbol_error = str(e)
+    except InsufficientFunds as e:
+        logger.error(f"[InsufficientFunds] {str(e)}")
+        response.interval_error = str(e)
     except BadRequest as e:
-        logger.error("[BadRequest] %s (%s)", response.interval, e)
-        response.interval_error = True
-    except asyncio.CancelledError:
-        logger.error(
-            "[CancelledError] unable to fetch raw data for %s %s",
-            response.symbol, response.interval
-        )
+        logger.error(f"[BadRequest] {str(e)}")
+        response.bad_request = str(e)
+    except ExchangeNotAvailable as e:
+        logger.error(f"[ExchangeNotAvailable] {str(e)}")
+        response.exchange_error = str(e)
     except Exception as e:
-        logger.error(
-            "[Exception] unable to fetch raw data for %s %s -> %s",
-            response.symbol, response.interval, e, exc_info=True,
-        )
-        response.network_error = True
-    else:
-        logger.info(
-            "... fetched %s elements for %s %s in %s ms: OK",
-            len(res), response.symbol, response.interval,
-            round((time.time() - start) * 1000)
-        )
-        response.data = res
-        # convert the result, so that the sublists correspond to OHLCV
-        # response.data = list(zip(*res))
-    finally:
-        return response
+        logger.error(f"[Unexpected Error] {str(e)}", exc_info=True)
+        response.unexpected_error = str(e)
+
+    return response
 
 
 async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> None:
@@ -315,8 +416,7 @@ async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> 
         id=id_
     )
 
-    logger.info(response)
-    logger.debug(response.success)
+    logger.debug(response)
 
     if response.success:
         response = await get_ohlcv(response)
@@ -374,6 +474,12 @@ async def ohlcv_repository(
 
                 request = json.loads(request)
 
+                if request.get("action") == "close":
+                    logger.info("shutdown request received ...")
+                    await exchange_factory(None)
+                    requests.send_multipart([identity, b"", b"OK"])
+                    break
+
                 # process request in the background
                 asyncio.create_task(process_request(request, requests, identity))
 
@@ -389,7 +495,10 @@ async def ohlcv_repository(
 
     # cleanup
     await exchange_factory(None)
+    await asyncio.sleep(3)
     requests.close(1)
+
+    logger.info("ohlcv repository shutdown complete: OK")
 
 
 if __name__ == "__main__":
