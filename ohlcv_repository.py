@@ -49,6 +49,7 @@ from ccxt.base.errors import (
     BadSymbol, BadRequest, AuthenticationError,
     InsufficientFunds, NetworkError,
     ExchangeNotAvailable, RequestTimeout,
+    ExchangeError
     )
 from typing import Optional, Dict, Tuple
 
@@ -61,9 +62,8 @@ MAX_RETRIES = 3
 RETRY_DELAY = 5.0
 RUNNING_CLEANUP = False
 
+
 # ====================================================================================
-
-
 @dataclass
 class Response:
     """Response class.
@@ -87,12 +87,14 @@ class Response:
     _network_error: bool = False
 
     def __repr__(self):
-        data = f"{len(self.data)} klines" if self.data else None
+        if self.data is not None and len(self.data) > 0:
+            data_str = f", data[{len(self.data)}]: {self.data[1]}...{self.data[-1]}"
+        else:
+            data_str = f", errors: {self.errors}"
 
         return f"Response(exchange={self.exchange}, symbol={self.symbol}, " \
-               f"interval={self.interval}, success={self.success}, data={data}, "\
-               f"bad_request={self.bad_request}"\
-               f"errors={self.errors or None})"
+               f"interval={self.interval}, success={self.success}, "\
+               f"bad_request={self.bad_request}{data_str})"
 
     @property
     def errors(self):
@@ -175,8 +177,44 @@ class Response:
         self.symbol_error = True if not isinstance(self.symbol, str) else False
         self.interval_error = True if not isinstance(self.interval, str) else False
 
-    async def send(self):
-        # Create the response payload based on the current state of the object
+    @classmethod
+    def from_json(cls, json_string: str) -> 'Response':
+        """
+        Reconstruct a Response object from a JSON string.
+
+        Parameters:
+        -----------
+        json_string : str
+            A JSON string containing the serialized Response data.
+
+        Returns:
+        --------
+        Response
+            A new Response object reconstructed from the JSON data.
+        """
+        json_data = json.loads(json_string)
+
+        response = cls(
+            exchange=json_data.get('exchange'),
+            symbol=json_data.get('symbol'),
+            interval=json_data.get('interval'),
+            socket=None,  # Socket can't be serialized, so we set it to None
+            id=None
+        )
+
+        # Restore other attributes
+        response.data = json_data.get('data', [])
+
+        # Reconstruct errors
+        errors = json_data.get('errors', {})
+        errors = errors if isinstance(errors, dict) else {}
+        for error_type, error_message in errors.items():
+            if error_message:  # Only set non-False error messages
+                setattr(response, error_type, error_message)
+
+        return response
+
+    def to_json(self):
         response = {
             "exchange": self.exchange,
             "symbol": self.symbol,
@@ -196,13 +234,16 @@ class Response:
                 response[k] = None
                 response["errors"][k] = str(e)
                 response["success"] = False
+        return response
 
+    async def send(self):
         # Send the response back through the socket
         await self.socket.send_multipart(
-            [self.id, b'', json.dumps(response).encode('utf-8')]
+            [self.id, b'', json.dumps(self.to_json()).encode('utf-8')]
         )
 
 
+# ====================================================================================
 def exchange_factory_fn():
     exchange_instances = {}
 
@@ -358,6 +399,9 @@ async def get_ohlcv(response: Response) -> None:
     Response
     """
     exchange = await exchange_factory(response.exchange)
+    interval_errors = (
+        "period", "interval", "timeframe", "binSize", "candlestick", "step",
+        )
 
     if not exchange:
         response.exchange_error = f"Exchange {response.exchange} not available"
@@ -366,6 +410,17 @@ async def get_ohlcv(response: Response) -> None:
     if not hasattr(exchange, "fetch_ohlcv"):
         response.fetch_ohlcv_not_available = True
         return response
+
+    if response.interval not in exchange.timeframes:
+        response.interval_error = True
+        return response
+
+    try:
+        if response.symbol not in exchange.symbols:
+            response.symbol_error = True
+            return response
+    except:  # noqa: E722
+        pass
 
     try:
         response.data = await exchange.fetch_ohlcv(
@@ -376,16 +431,34 @@ async def get_ohlcv(response: Response) -> None:
         response.authentication_error = str(e)
     except BadSymbol as e:
         logger.error(f"[BadSymbol] {str(e)}")
-        response.symbol_error = str(e)
+        response.symbol_error = True
+
+    # ccxt is inconsistent when encountering an error
+    # that is caused by an invalid interval. some special
+    # handling is required here
     except InsufficientFunds as e:
         logger.error(f"[InsufficientFunds] {str(e)}")
-        response.interval_error = str(e)
+        response.interval_error = True
     except BadRequest as e:
         logger.error(f"[BadRequest] {str(e)}")
-        response.bad_request = str(e)
+        if any(s in str(e) for s in interval_errors):
+            response.interval_error = True
+        else:
+            response._bad_request_error = str(e)
+    except ExchangeError as e:
+        logger.error(f"[ExchangeError] {str(e)}")
+        if "poloniex" in str(e):
+            response.interval_error = True
+        elif any(s in str(e) for s in interval_errors):
+            response.interval_error = True
+        else:
+            response.exchange_error = str(e)
     except ExchangeNotAvailable as e:
         logger.error(f"[ExchangeNotAvailable] {str(e)}")
-        response.exchange_error = str(e)
+        if any(s in str(e) for s in interval_errors):
+            response.interval_error = True
+        else:
+            response.exchange_error = str(e)
     except Exception as e:
         logger.error(f"[Unexpected Error] {str(e)}", exc_info=True)
         response.unexpected_error = str(e)
