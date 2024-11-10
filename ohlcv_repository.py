@@ -40,6 +40,7 @@ import ccxt.pro as ccxt
 import functools
 import json
 import logging
+import numpy as np
 import time
 import zmq
 import zmq.asyncio
@@ -58,6 +59,7 @@ logger = logging.getLogger("main.ohlcv_repository")
 
 DEFAULT_ADDRESS = "inproc://ohlcv_repository"
 KLINES_LIMIT = 1000
+CACHE_TTL_SECONDS = 30
 MAX_RETRIES = 3
 RETRY_DELAY = 5.0
 RUNNING_CLEANUP = False
@@ -177,6 +179,7 @@ class Response:
         self.symbol_error = True if not isinstance(self.symbol, str) else False
         self.interval_error = True if not isinstance(self.interval, str) else False
 
+    # ------ Functions for sending the response and reconstructing it from JSON ------
     @classmethod
     def from_json(cls, json_string: str) -> 'Response':
         """
@@ -242,6 +245,29 @@ class Response:
             [self.id, b'', json.dumps(self.to_json()).encode('utf-8')]
         )
 
+    # -------- Functions for converting the OHLCV data to the desired format ---------
+    def to_dict(self) -> Optional[Dict[str, np.ndarray]]:
+        """Convert OHLCV data to a dictionary.
+
+        Returns
+        -------
+        Optional[Dict[str, Any]]
+            A dictionary containing the OHLCV data, or None if we have no data
+        """
+        if not self.data:
+            return None
+
+        data_array = np.array(self.data).T
+
+        return {
+            "open time": data_array[0],
+            "open": data_array[1],
+            "high": data_array[2],
+            "low": data_array[3],
+            "close": data_array[4],
+            "volume": data_array[5],
+        }
+
 
 # ====================================================================================
 def exchange_factory_fn():
@@ -301,7 +327,7 @@ exchange_factory = exchange_factory_fn()
 
 
 # ====================================================================================
-def cache_ohlcv(ttl_seconds: int = 60):
+def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
     """
     Decorator function to cache OHLCV (Open, High, Low, Close, Volume) data.
 
@@ -344,7 +370,7 @@ def cache_ohlcv(ttl_seconds: int = 60):
             if cache_key in ohlcv_cache:
                 cached_data, timestamp = ohlcv_cache[cache_key]
                 if current_time - timestamp <= ttl_seconds:
-                    logger.info(f"Returning cached OHLCV data for {cache_key}")
+                    logger.debug(f"Returning cached OHLCV data for {cache_key}")
                     response.data = cached_data
                     response.cached = True
                     execution_time = (time.time() - start_time) * 1000
@@ -374,11 +400,11 @@ def cache_ohlcv(ttl_seconds: int = 60):
                         await asyncio.sleep(RETRY_DELAY * (attempt + 1))
 
             execution_time = (time.time() - start_time) * 1000
-            logger.info(
-                f"Fetched {len(result.data) if result.data else None} elements for "
-                f"{result.symbol} {result.interval} "
-                f"in {execution_time:.2f} ms: {'OK' if result.data else 'FAILED'}"
-            )
+            # logger.debug(
+            #     f"Fetched {len(result.data) if result.data else None} elements for "
+            #     f"{result.symbol} {result.interval} "
+            #     f"in {execution_time:.2f} ms: {'OK' if result.data else 'FAILED'}"
+            # )
 
             return result
 
@@ -466,7 +492,46 @@ async def get_ohlcv(response: Response) -> None:
     return response
 
 
-async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> None:
+@cache_ohlcv()
+async def get_ohlcv_for_no_of_days(response: Response, n_days: int = 1295) -> None:
+    exchange: ccxt.Exchange = await exchange_factory(response.exchange)
+
+    # Calculate the starting timestamp
+    end_time = exchange.parse8601(
+        f'{time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}'
+        )
+    start_time = end_time - n_days * 24 * 60 * 60 * 1000  # Convert days to milliseconds
+
+    # Store all data
+    ohlcv_data = []
+    current_time = start_time
+
+    while current_time < end_time:
+        # Fetch data with limit (usually 1000)
+        batch = await exchange.fetch_ohlcv(
+            symbol=response.symbol,
+            timeframe=response.interval,
+            since=current_time,
+            limit=None
+        )
+        if not batch:
+            break  # Exit if no more data is returned
+
+        # Append batch data
+        ohlcv_data.extend(batch)
+
+        # Move to the next time interval
+        current_time = batch[-1][0] + 1  # +1 to avoid overlap
+
+    response.data = ohlcv_data
+    return response
+
+
+async def process_request(
+    req: dict, socket:
+    zmq.asyncio.Socket | None = None,
+    id_: bytes | None = None
+) -> None:
     """Process a client request for OHLCV data
 
     Parameters
@@ -492,9 +557,12 @@ async def process_request(req: dict, socket: zmq.asyncio.Socket, id_: bytes) -> 
     logger.debug(response)
 
     if response.success:
-        response = await get_ohlcv(response)
+        response = await get_ohlcv_for_no_of_days(response)
 
-    await response.send()
+    if response.socket:
+        await response.send()
+    else:
+        return response
 
 
 async def ohlcv_repository(
@@ -536,14 +604,14 @@ async def ohlcv_repository(
 
     while True:
         try:
-            events = dict(await poller.poll(100))
+            events = dict(await poller.poll())
 
             if requests in events:
                 msg = await requests.recv_multipart()
                 logger.debug("received message: %s", msg)
                 identity, request = msg[0], msg[2].decode()
 
-                logger.info("received request: %s from %s", request, identity)
+                logger.debug("received request: %s from %s", request, identity)
 
                 request = json.loads(request)
 
@@ -564,6 +632,7 @@ async def ohlcv_repository(
             logger.info("task cancelled -> closing exchange ...")
 
             await requests.send_json([])
+            asyncio.sleep(0.001)
             break
 
     # cleanup
