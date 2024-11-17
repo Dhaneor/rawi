@@ -493,7 +493,7 @@ async def get_ohlcv(response: Response) -> None:
 
 
 @cache_ohlcv()
-async def get_ohlcv_for_no_of_days(response: Response, n_days: int = 1295) -> None:
+async def get_ohlcv_for_no_of_days(response: Response, n_days: int = 1296) -> None:
     exchange: ccxt.Exchange = await exchange_factory(response.exchange)
 
     # Calculate the starting timestamp
