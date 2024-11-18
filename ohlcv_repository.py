@@ -59,6 +59,7 @@ logger = logging.getLogger("main.ohlcv_repository")
 
 DEFAULT_ADDRESS = "inproc://ohlcv_repository"
 KLINES_LIMIT = 1000
+RATE_LIMIT = True
 CACHE_TTL_SECONDS = 30
 MAX_RETRIES = 3
 RETRY_DELAY = 5.0
@@ -299,8 +300,8 @@ def exchange_factory_fn():
         # Close all exchanges request
         if exchange_name is None:
             for name, instance in exchange_instances.items():
-                logger.info(f"Closing exchange: {name}")
                 await instance.close()
+                logger.info(f"Exchange closed: {name}")
             exchange_instances.clear()
             return None
 
@@ -312,7 +313,7 @@ def exchange_factory_fn():
         # Create a new exchange instance
         logger.info(f"Instantiating exchange: {exchange_name}")
         try:
-            exchange = getattr(ccxt, exchange_name)({"enableRateLimit": True})
+            exchange = getattr(ccxt, exchange_name)({"enableRateLimit": RATE_LIMIT})
             exchange_instances[exchange_name] = exchange
             return exchange
         except AttributeError as e:
@@ -386,7 +387,7 @@ def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
                     result = await func(response)
                     if result.data:
                         ohlcv_cache[cache_key] = (result.data, current_time)
-                        logger.info(f"Cached OHLCV data for {cache_key}")
+                        logger.debug(f"Cached OHLCV data for {cache_key}")
                     break
                 except (NetworkError, ExchangeNotAvailable, RequestTimeout) as e:
                     if attempt == MAX_RETRIES - 1:
@@ -400,11 +401,11 @@ def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
                         await asyncio.sleep(RETRY_DELAY * (attempt + 1))
 
             execution_time = (time.time() - start_time) * 1000
-            # logger.debug(
-            #     f"Fetched {len(result.data) if result.data else None} elements for "
-            #     f"{result.symbol} {result.interval} "
-            #     f"in {execution_time:.2f} ms: {'OK' if result.data else 'FAILED'}"
-            # )
+            logger.info(
+                f"Fetched {len(result.data) if result.data else None} elements for "
+                f"{result.symbol} {result.interval} "
+                f"in {execution_time:.2f} ms: {'OK' if result.data else 'FAILED'}"
+            )
 
             return result
 
@@ -528,8 +529,8 @@ async def get_ohlcv_for_no_of_days(response: Response, n_days: int = 1296) -> No
 
 
 async def process_request(
-    req: dict, socket:
-    zmq.asyncio.Socket | None = None,
+    req: dict,
+    socket: zmq.asyncio.Socket | None = None,
     id_: bytes | None = None
 ) -> None:
     """Process a client request for OHLCV data
