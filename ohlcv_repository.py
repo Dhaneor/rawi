@@ -4,7 +4,12 @@
 Provides a specialized OHLCV repository for the OHLCV containers.
 
 classes
-    None
+    Response
+
+    This class standardizes the response, does type checks for the
+    values from the request, and includes a method for sending the
+    response after fetching the OHLCV data (including some error
+    flags for the client).
 
 functions
     ohlcv_repository
@@ -414,6 +419,41 @@ def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
 
 
 @cache_ohlcv()
+async def get_ohlcv_for_no_of_days(response: Response, n_days: int = 1296) -> None:
+    exchange: ccxt.Exchange = await exchange_factory(response.exchange)
+
+    # Calculate the starting timestamp
+    end_time = exchange.parse8601(
+        f'{time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}'
+        )
+    start_time = end_time - n_days * 24 * 60 * 60 * 1000  # Convert days to milliseconds
+
+    # Store all data
+    ohlcv_data = []
+    current_time = start_time
+
+    while current_time < end_time:
+        # Fetch data with limit (usually 1000)
+        batch = await exchange.fetch_ohlcv(
+            symbol=response.symbol,
+            timeframe=response.interval,
+            since=current_time,
+            limit=None
+        )
+        if not batch:
+            break  # Exit if no more data is returned
+
+        # Append batch data
+        ohlcv_data.extend(batch)
+
+        # Move to the next time interval
+        current_time = batch[-1][0] + 1  # +1 to avoid overlap
+
+    response.data = ohlcv_data
+    return response
+
+
+@cache_ohlcv()
 async def get_ohlcv(response: Response) -> None:
     """Get OHLCV data for a given exchange, symbol and interval.
 
@@ -449,10 +489,12 @@ async def get_ohlcv(response: Response) -> None:
     except:  # noqa: E722
         pass
 
+    # ................................................................................
     try:
-        response.data = await exchange.fetch_ohlcv(
-            symbol=response.symbol, timeframe=response.interval, limit=KLINES_LIMIT
-        )
+        response = await get_ohlcv_for_no_of_days(response)
+        # response.data = await exchange.fetch_ohlcv(
+        #     symbol=response.symbol, timeframe=response.interval, limit=KLINES_LIMIT
+        # )
     except AuthenticationError as e:
         logger.error(f"[AuthenticationError] {str(e)}")
         response.authentication_error = str(e)
@@ -493,41 +535,6 @@ async def get_ohlcv(response: Response) -> None:
     return response
 
 
-@cache_ohlcv()
-async def get_ohlcv_for_no_of_days(response: Response, n_days: int = 1296) -> None:
-    exchange: ccxt.Exchange = await exchange_factory(response.exchange)
-
-    # Calculate the starting timestamp
-    end_time = exchange.parse8601(
-        f'{time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}'
-        )
-    start_time = end_time - n_days * 24 * 60 * 60 * 1000  # Convert days to milliseconds
-
-    # Store all data
-    ohlcv_data = []
-    current_time = start_time
-
-    while current_time < end_time:
-        # Fetch data with limit (usually 1000)
-        batch = await exchange.fetch_ohlcv(
-            symbol=response.symbol,
-            timeframe=response.interval,
-            since=current_time,
-            limit=None
-        )
-        if not batch:
-            break  # Exit if no more data is returned
-
-        # Append batch data
-        ohlcv_data.extend(batch)
-
-        # Move to the next time interval
-        current_time = batch[-1][0] + 1  # +1 to avoid overlap
-
-    response.data = ohlcv_data
-    return response
-
-
 async def process_request(
     req: dict,
     socket: zmq.asyncio.Socket | None = None,
@@ -558,7 +565,7 @@ async def process_request(
     logger.debug(response)
 
     if response.success:
-        response = await get_ohlcv_for_no_of_days(response)
+        response = await get_ohlcv(response)
 
     if response.socket:
         await response.send()
