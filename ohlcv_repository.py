@@ -59,8 +59,9 @@ from ccxt.base.errors import (
     )
 from typing import Optional, Dict, Tuple
 
-logger = logging.getLogger("main.ohlcv_repository")
+from .util.binance_async import Binance
 
+logger = logging.getLogger("main.ohlcv_repository")
 
 DEFAULT_ADDRESS = "inproc://ohlcv_repository"
 KLINES_LIMIT = 1000
@@ -339,8 +340,15 @@ def exchange_factory_fn():
 
         # Create a new exchange instance
         logger.info(f"Instantiating exchange: {exchange_name}")
+        if exchange_name.lower() == "binance":
+            exchange = Binance()
+            await exchange.initialize()
+            exchange_instances[exchange_name] = exchange
+            return exchange
+
         try:
             exchange = getattr(ccxt, exchange_name)({"enableRateLimit": RATE_LIMIT})
+            await exchange.load_markets()
             exchange_instances[exchange_name] = exchange
             return exchange
         except AttributeError as e:
@@ -498,11 +506,25 @@ async def get_ohlcv(response: Response, exchange: ccxt.Exchange) -> Response:
         pass
 
     # ................................................................................
+    # with Binance we can use parallel calls to make this step faster
+    if exchange.name == "binance":
+        result = await exchange.fetch_ohlcv(
+            symbol="".join(response.symbol.split("/")),
+            interval=response.interval,
+            limit=1296
+        )
+
+        response.data = [
+            [float(row[i]) if i != 0 else int(row[i]) for i in range(len(row))]
+            for row in result
+        ]  # Convert to ccxt format (Binance returns strings)
+
+        return response
+
+    # serial calls to fetch OHLCV data for all other exchanges
     try:
         response = await get_ohlcv_for_no_of_days(response, exchange)
-        # response.data = await exchange.fetch_ohlcv(
-        #     symbol=response.symbol, timeframe=response.interval, limit=KLINES_LIMIT
-        # )
+        logger.debug(response.data)
     except AuthenticationError as e:
         logger.error(f"[AuthenticationError] {str(e)}")
         response.authentication_error = str(e)
@@ -579,20 +601,16 @@ async def process_request(
             response.exchange_error = f"Exchange {response.exchange} not available"
             return response
 
-        # log server time in human-readable format
-        logger.info(
-            "Server time: %s",
-            exchange.iso8601(await exchange.fetch_time()).split('T')[1][:-5]
-            )
+        # # log server time in human-readable format
+        # logger.info(
+        #     "Server time: %s",
+        #     exchange.iso8601(await exchange.fetch_time()).split('T')[1][:-5]
+        #     )
 
         # log server status
         status = await exchange.fetch_status()
         status = 'OK' if status['status'] == 'ok' else status
         logger.info("Server status: %s" % status)
-
-        # this is necessary to initiate the exchange instance and log
-        # correct download execution times later on
-        await exchange.load_markets()
 
         # download OHLCV data
         response = await get_ohlcv(response=response, exchange=exchange)
