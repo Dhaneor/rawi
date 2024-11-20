@@ -548,7 +548,7 @@ async def process_request(
     socket: zmq.asyncio.Socket | None = None,
     id_: bytes | None = None
 ) -> None:
-    """Process a client request for OHLCV data
+    """Process a client request for OHLCV data.
 
     Parameters
     ----------
@@ -572,9 +572,9 @@ async def process_request(
 
     logger.debug(response)
 
-    # proceed only if a valid Repsonse object is created
+    # proceed only if a valid Response object has been created
     if response.success:
-        # try to get a wokring exchange instance
+        # try to get a working exchange instance
         if not (exchange := await exchange_factory(response.exchange)):
             response.exchange_error = f"Exchange {response.exchange} not available"
             return response
