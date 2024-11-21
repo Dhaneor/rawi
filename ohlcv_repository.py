@@ -51,6 +51,7 @@ import zmq
 import zmq.asyncio
 
 from dataclasses import dataclass
+from datetime import datetime
 from ccxt.base.errors import (
     BadSymbol, BadRequest, AuthenticationError,
     InsufficientFunds, NetworkError,
@@ -340,6 +341,8 @@ def exchange_factory_fn():
 
         # Create a new exchange instance
         logger.info(f"Instantiating exchange: {exchange_name}")
+
+        # some special treatment for Binance here
         if exchange_name.lower() == "binance":
             exchange = Binance()
             await exchange.initialize()
@@ -363,6 +366,33 @@ exchange_factory = exchange_factory_fn()
 
 
 # ====================================================================================
+async def log_server_time(exchange) -> None:
+    """Get the server time from the exchange."""
+    try:
+        if exchange.name.lower() == "binance":
+            time = await exchange.fetch_time()
+            time = datetime.fromtimestamp(time.get('serverTime') / 1000).isoformat()
+            time = time.split('T')[1][:-7]
+        else:
+            time = exchange.iso8601(await exchange.fetch_time()).split('T')[1][:-5]
+    except Exception as e:
+        logger.error(f"Error fetching server time from exchange: {e}")
+        time = None
+
+    if time:
+        logger.info("Server time: %s" % time)
+
+
+async def log_server_status(exchange) -> None:
+    """Log the server status from the exchange."""
+    try:
+        status = await exchange.fetch_status()
+        status = 'OK' if status['status'] == 'ok' else status
+        logger.info("Server status: %s" % status)
+    except Exception as e:
+        logger.error(f"Error fetching server status from exchange: {e}")
+
+
 def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
     """
     Decorator function to cache OHLCV (Open, High, Low, Close, Volume) data.
@@ -601,16 +631,12 @@ async def process_request(
             response.exchange_error = f"Exchange {response.exchange} not available"
             return response
 
-        # # log server time in human-readable format
-        # logger.info(
-        #     "Server time: %s",
-        #     exchange.iso8601(await exchange.fetch_time()).split('T')[1][:-5]
-        #     )
+        tasks = (
+            asyncio.create_task(log_server_time(exchange)),
+            asyncio.create_task(log_server_status(exchange)),
+        )
 
-        # log server status
-        status = await exchange.fetch_status()
-        status = 'OK' if status['status'] == 'ok' else status
-        logger.info("Server status: %s" % status)
+        await asyncio.gather(*tasks)
 
         # download OHLCV data
         response = await get_ohlcv(response=response, exchange=exchange)
