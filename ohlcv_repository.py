@@ -68,8 +68,12 @@ DEFAULT_ADDRESS = "inproc://ohlcv_repository"
 KLINES_LIMIT = 1000
 RATE_LIMIT = True
 CACHE_TTL_SECONDS = 30
+
+LOG_STATUS = False
+
 MAX_RETRIES = 3
 RETRY_DELAY = 5.0
+
 RUNNING_CLEANUP = False
 
 
@@ -631,12 +635,13 @@ async def process_request(
             response.exchange_error = f"Exchange {response.exchange} not available"
             return response
 
-        tasks = (
-            asyncio.create_task(log_server_time(exchange)),
-            asyncio.create_task(log_server_status(exchange)),
-        )
+        if LOG_STATUS:
+            tasks = (
+                asyncio.create_task(log_server_time(exchange)),
+                asyncio.create_task(log_server_status(exchange)),
+            )
 
-        await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
 
         # download OHLCV data
         response = await get_ohlcv(response=response, exchange=exchange)
