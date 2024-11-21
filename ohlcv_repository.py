@@ -639,12 +639,17 @@ async def process_request(
             tasks = (
                 asyncio.create_task(log_server_time(exchange)),
                 asyncio.create_task(log_server_status(exchange)),
+                asyncio.create_task(get_ohlcv(response=response, exchange=exchange))
             )
 
-            await asyncio.gather(*tasks)
-
-        # download OHLCV data
-        response = await get_ohlcv(response=response, exchange=exchange)
+            response = next(
+                filter(
+                    lambda x: x is not None,
+                    await asyncio.gather(*tasks)
+                )
+            )
+        else:
+            response = await get_ohlcv(response=response, exchange=exchange)
 
     if response.socket:
         await response.send()
