@@ -40,7 +40,6 @@ Created on Sat Sep 16 13:58:23 2023
 """
 import asyncio
 
-# import ccxt.async_support as ccxt
 import ccxt.pro as ccxt
 import functools
 import json
