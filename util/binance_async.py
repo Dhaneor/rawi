@@ -8,7 +8,7 @@ Created on Nov 20 16:33:20 2024
 import asyncio
 import logging
 from binance import AsyncClient
-from datetime import datetime
+from datetime import datetime, UTC
 from math import ceil
 
 logger = logging.getLogger(f"main.{__name__}")
@@ -26,7 +26,6 @@ class Binance:
     async def initialize(self):
         self.client = AsyncClient()
         return
-        self.client = await AsyncClient.create()
 
     async def close(self):
         if self.client:
@@ -43,7 +42,7 @@ class Binance:
             tasks = []
 
             # Calculate the end time (now) and start time
-            end_time = int(datetime.now().timestamp() * 1000)  # in milliseconds
+            end_time = int(datetime.now(UTC).timestamp() * 1000)  # in milliseconds
 
             # Calculate interval in milliseconds
             interval_ms = self._interval_to_milliseconds(interval)
@@ -71,25 +70,31 @@ class Binance:
             flattened = [candle for batch in reversed(results) for candle in batch]
             return flattened[:limit]
 
-    def _interval_to_milliseconds(self, interval):
-        """Convert a Binance interval string to milliseconds"""
-        unit = interval[-1]
-        if unit == 'm':
-            return int(interval[:-1]) * 60 * 1000
-        elif unit == 'h':
-            return int(interval[:-1]) * 60 * 60 * 1000
-        elif unit == 'd':
-            return int(interval[:-1]) * 24 * 60 * 60 * 1000
-        elif unit == 'w':
-            return int(interval[:-1]) * 7 * 24 * 60 * 60 * 1000
-        else:
-            raise ValueError(f"Invalid interval: {interval}")
-
     async def fetch_status(self):
         return await self.client.get_system_status()
 
     async def fetch_time(self):
         return await self.client.get_server_time()
+
+    def _interval_to_milliseconds(self, interval):
+        """Convert a Binance interval string to milliseconds"""
+        unit = interval[-1]
+
+        match unit:
+            case 's':
+                return int(interval[:-1]) * 1000
+            case 'm':
+                return int(interval[:-1]) * 60 * 1000
+            case 'h':
+                return int(interval[:-1]) * 60 * 60 * 1000
+            case 'd':
+                return int(interval[:-1]) * 24 * 60 * 60 * 1000
+            case 'w':
+                return int(interval[:-1]) * 7 * 24 * 60 * 60 * 1000
+            case 'M':
+                return int(interval[:-1]) * 30 * 24 * 60 * 60 * 1000
+            case _:
+                raise ValueError(f"Invalid interval: {interval}")
 
 
 async def main():
@@ -101,7 +106,7 @@ async def main():
         print(f"OHLCV Data - got {len(ohlcv) if ohlcv else 'NO'} candles")
 
         # Test with different intervals
-        ohlcv_15m = await binance.fetch_ohlcv("BTCUSDT", "15m", 1500)
+        ohlcv_15m = await binance.fetch_ohlcv("BTCUSDT", "15m", 15876)
         print(f"15m OHLCV Data - got {len(ohlcv_15m) if ohlcv_15m else 'NO'} candles")
 
         ohlcv_1d = await binance.fetch_ohlcv("BTCUSDT", "1d", 500)
