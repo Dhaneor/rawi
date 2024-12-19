@@ -38,6 +38,7 @@ Created on Sat Sep 16 13:58:23 2023
 
 @author_ dhaneor
 """
+
 import asyncio
 
 import ccxt.pro as ccxt
@@ -52,14 +53,19 @@ import zmq.asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from ccxt.base.errors import (
-    BadSymbol, BadRequest, AuthenticationError,
-    InsufficientFunds, NetworkError,
-    ExchangeNotAvailable, RequestTimeout,
-    ExchangeError
-    )
+    BadSymbol,
+    BadRequest,
+    AuthenticationError,
+    InsufficientFunds,
+    NetworkError,
+    ExchangeNotAvailable,
+    RequestTimeout,
+    ExchangeError,
+)
 from typing import Optional, Dict, Tuple
 
 from .util.binance_async import Binance
+
 
 logger = logging.getLogger("main.ohlcv_repository")
 
@@ -85,6 +91,7 @@ class Response:
     the request, and includes a method for sending the response after fetching
     the OHLCV data (including some error flags for the client).
     """
+
     exchange: str = None
     symbol: str = None
     interval: str = None
@@ -106,9 +113,11 @@ class Response:
         else:
             data_str = f", errors: {self.errors}"
 
-        return f"Response(exchange={self.exchange}, symbol={self.symbol}, " \
-               f"interval={self.interval}, success={self.success}, "\
-               f"bad_request={self.bad_request}{data_str})"
+        return (
+            f"Response(exchange={self.exchange}, symbol={self.symbol}, "
+            f"interval={self.interval}, success={self.success}, "
+            f"bad_request={self.bad_request}{data_str})"
+        )
 
     @property
     def execution_time(self):
@@ -124,13 +133,14 @@ class Response:
             self.symbol,
             self.interval,
             int(value * 1000),
-            "OK" if self.data else "FAIL"
+            "OK" if self.data else "FAIL",
         )
 
     @property
     def errors(self):
         return {
-            attr: getattr(self, attr) for attr in dir(self)
+            attr: getattr(self, attr)
+            for attr in dir(self)
             if attr.startswith("_") and "error" in attr and getattr(self, attr)
         }
 
@@ -184,15 +194,19 @@ class Response:
 
     @property
     def bad_request(self) -> bool:
-        return True if any(
-            (
-                self._bad_request_error,
-                self._authentication_error,
-                self._exchange_error,
-                self._symbol_error,
-                self._interval_error,
+        return (
+            True
+            if any(
+                (
+                    self._bad_request_error,
+                    self._authentication_error,
+                    self._exchange_error,
+                    self._symbol_error,
+                    self._interval_error,
+                )
             )
-        ) else False
+            else False
+        )
 
     @bad_request.setter
     def bad_request(self, value: bool) -> None:
@@ -210,7 +224,7 @@ class Response:
 
     # ------ Functions for sending the response and reconstructing it from JSON ------
     @classmethod
-    def from_json(cls, json_string: str) -> 'Response':
+    def from_json(cls, json_string: str) -> "Response":
         """
         Reconstruct a Response object from a JSON string.
 
@@ -227,18 +241,18 @@ class Response:
         json_data = json.loads(json_string)
 
         response = cls(
-            exchange=json_data.get('exchange'),
-            symbol=json_data.get('symbol'),
-            interval=json_data.get('interval'),
+            exchange=json_data.get("exchange"),
+            symbol=json_data.get("symbol"),
+            interval=json_data.get("interval"),
             socket=None,  # Socket can't be serialized, so we set it to None
-            id=None
+            id=None,
         )
 
         # Restore other attributes
-        response.data = json_data.get('data', [])
+        response.data = json_data.get("data", [])
 
         # Reconstruct errors
-        errors = json_data.get('errors', {})
+        errors = json_data.get("errors", {})
         errors = errors if isinstance(errors, dict) else {}
         for error_type, error_message in errors.items():
             if error_message:  # Only set non-False error messages
@@ -275,7 +289,7 @@ class Response:
 
         # Send the response back through the socket
         await self.socket.send_multipart(
-            [self.id, b'', json.dumps(self.to_json()).encode('utf-8')]
+            [self.id, b"", json.dumps(self.to_json()).encode("utf-8")]
         )
 
     # -------- Functions for converting the OHLCV data to the desired format ---------
@@ -374,10 +388,10 @@ async def log_server_time(exchange) -> None:
     try:
         if exchange.name.lower() == "binance":
             time = await exchange.fetch_time()
-            time = datetime.fromtimestamp(time.get('serverTime') / 1000).isoformat()
-            time = time.split('T')[1][:-7]
+            time = datetime.fromtimestamp(time.get("serverTime") / 1000).isoformat()
+            time = time.split("T")[1][:-7]
         else:
-            time = exchange.iso8601(await exchange.fetch_time()).split('T')[1][:-5]
+            time = exchange.iso8601(await exchange.fetch_time()).split("T")[1][:-5]
     except Exception as e:
         logger.error(f"Error fetching server time from exchange: {e}")
         time = None
@@ -390,7 +404,7 @@ async def log_server_status(exchange) -> None:
     """Log the server status from the exchange."""
     try:
         status = await exchange.fetch_status()
-        status = 'OK' if status['status'] == 'ok' else status
+        status = "OK" if status["status"] == "ok" else status
         logger.info("Server status: %s" % status)
     except Exception as e:
         logger.error(f"Error fetching server status from exchange: {e}")
@@ -418,6 +432,7 @@ def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
     - Returns a Response object, either from the cache or by calling the
       original function.
     """
+
     def decorator(func):
         ohlcv_cache: Dict[Tuple[str, str, str], Tuple[Dict, float]] = {}
 
@@ -428,7 +443,8 @@ def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
 
             # Clean expired cache entries
             expired_keys = [
-                key for key, (_, timestamp) in ohlcv_cache.items()
+                key
+                for key, (_, timestamp) in ohlcv_cache.items()
                 if current_time - timestamp > ttl_seconds
             ]
             for key in expired_keys:
@@ -453,33 +469,30 @@ def cache_ohlcv(ttl_seconds: int = CACHE_TTL_SECONDS):
                     except (NetworkError, ExchangeNotAvailable, RequestTimeout) as e:
                         if attempt == MAX_RETRIES - 1:
                             logger.error(
-                                "Max retries reached for %s: %s",
-                                cache_key,
-                                str(e)
-                                )
+                                "Max retries reached for %s: %s", cache_key, str(e)
+                            )
                             response.network_error = str(e)
                         else:
                             logger.warning(
                                 f"Retry {attempt + 1} for {cache_key} due to: {str(e)}"
-                                )
+                            )
                             await asyncio.sleep(RETRY_DELAY * (attempt + 1))
 
-            response.execution_time = (time.time() - start_time)
+            response.execution_time = time.time() - start_time
             return response
 
         return wrapper
+
     return decorator
 
 
 async def get_ohlcv_for_no_of_days(
-    response: Response,
-    exchange: ccxt.Exchange,
-    n_days: int = 1296
+    response: Response, exchange: ccxt.Exchange, n_days: int = 1296
 ) -> None:
     # Calculate the starting timestamp
     end_time = exchange.parse8601(
         f'{time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}'
-        )
+    )
     start_time = end_time - n_days * 24 * 60 * 60 * 1000  # Convert days to milliseconds
 
     # Store all data
@@ -492,7 +505,7 @@ async def get_ohlcv_for_no_of_days(
             symbol=response.symbol,
             timeframe=response.interval,
             since=current_time,
-            limit=None
+            limit=None,
         )
         if not batch:
             break  # Exit if no more data is returned
@@ -520,8 +533,13 @@ async def get_ohlcv(response: Response, exchange: ccxt.Exchange) -> Response:
     Response
     """
     interval_errors = (
-        "period", "interval", "timeframe", "binSize", "candlestick", "step",
-        )
+        "period",
+        "interval",
+        "timeframe",
+        "binSize",
+        "candlestick",
+        "step",
+    )
 
     if not hasattr(exchange, "fetch_ohlcv"):
         response.fetch_ohlcv_not_available = True
@@ -544,7 +562,7 @@ async def get_ohlcv(response: Response, exchange: ccxt.Exchange) -> Response:
         result = await exchange.fetch_ohlcv(
             symbol="".join(response.symbol.split("/")),
             interval=response.interval,
-            limit=1296
+            limit=1296,
         )
 
         response.data = [
@@ -599,9 +617,7 @@ async def get_ohlcv(response: Response, exchange: ccxt.Exchange) -> Response:
 
 
 async def process_request(
-    req: dict,
-    socket: zmq.asyncio.Socket | None = None,
-    id_: bytes | None = None
+    req: dict, socket: zmq.asyncio.Socket | None = None, id_: bytes | None = None
 ) -> None:
     """Process a client request for OHLCV data.
 
@@ -622,7 +638,7 @@ async def process_request(
         symbol=req.get("symbol"),
         interval=req.get("interval"),
         socket=socket,
-        id=id_
+        id=id_,
     )
 
     logger.debug(response)
@@ -638,14 +654,11 @@ async def process_request(
             tasks = (
                 asyncio.create_task(log_server_time(exchange)),
                 asyncio.create_task(log_server_status(exchange)),
-                asyncio.create_task(get_ohlcv(response=response, exchange=exchange))
+                asyncio.create_task(get_ohlcv(response=response, exchange=exchange)),
             )
 
             response = next(
-                filter(
-                    lambda x: x is not None,
-                    await asyncio.gather(*tasks)
-                )
+                filter(lambda x: x is not None, await asyncio.gather(*tasks))
             )
         else:
             response = await get_ohlcv(response=response, exchange=exchange)
@@ -657,8 +670,7 @@ async def process_request(
 
 
 async def ohlcv_repository(
-    ctx: Optional[zmq.asyncio.Context] = None,
-    addr: Optional[str] = None
+    ctx: Optional[zmq.asyncio.Context] = None, addr: Optional[str] = None
 ):
     """Start the OHLCV repository.
 
